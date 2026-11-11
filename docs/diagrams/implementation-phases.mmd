@@ -1,0 +1,6 @@
+flowchart LR
+    P1[Phase 1<br/>Main application<br/>and access control] --> P2[Phase 2<br/>Azure deployment]
+    P2 --> P3[Phase 3<br/>Google Drive<br/>storage integration]
+    P3 --> P4[Phase 4<br/>Completed contract<br/>PDF generation]
+    P1 -.->|local Drive stub allowed| P3
+    P1 -.->|data model ready| P4

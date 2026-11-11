@@ -1,0 +1,17 @@
+flowchart TD
+    A[Login] --> B[Dashboard]
+    B --> C[Create new contract form]
+    C --> D[Fill form sections]
+    D --> E{Complete?}
+    E -- No --> F[Save as Draft]
+    F --> G[Drafts list]
+    G --> D
+    E -- Yes --> H[Validate and Submit]
+    H --> I[Status: Pending Approval]
+    I --> J[Approval workflow]
+    J --> K{Outcome}
+    K -- Approved --> L[Approved: PDF generated and stored]
+    K -- Returned --> D
+    K -- Rejected --> M[Rejected - closed]
+    L --> N[Authorized document view / download]
+    B --> O[Track status on dashboard / register]

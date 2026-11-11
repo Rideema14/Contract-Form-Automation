@@ -1,0 +1,23 @@
+erDiagram
+    ROLES ||--o{ USERS : has
+    DEPARTMENTS ||--o{ USERS : employs
+    USERS ||--o{ CONTRACT_FORMS : creates
+    DEPARTMENTS ||--o{ CONTRACT_FORMS : sponsors
+    CONTRACT_CATEGORIES ||--o{ CONTRACT_FORMS : classifies
+    VENDORS ||--o{ CONTRACT_FORMS : "recommended for"
+    VENDOR_TYPES ||--o{ VENDORS : types
+    CONTRACT_FORMS ||--o{ BIDDERS : has
+    VENDORS ||--o{ BIDDERS : "appears as"
+    BIDDERS ||--o{ QUOTATIONS : submits
+    CONTRACT_FORMS ||--o{ EVALUATIONS : has
+    BIDDERS ||--o{ EVALUATIONS : "evaluated in"
+    CONTRACT_FORMS ||--o{ COST_ESTIMATE_ITEMS : has
+    CONTRACT_FORMS ||--o{ APPROVALS : "routed through"
+    USERS ||--o{ APPROVALS : "assigned to"
+    APPROVALS ||--o{ APPROVAL_HISTORY : records
+    CONTRACT_FORMS ||--o{ DOCUMENTS : attaches
+    USERS ||--o{ DOCUMENTS : uploads
+    CONTRACT_FORMS ||--o{ AUDIT_LOGS : tracked
+    USERS ||--o{ AUDIT_LOGS : performs
+    USERS ||--o{ NOTIFICATIONS : receives
+    CONTRACT_FORMS ||--o{ NOTIFICATIONS : about

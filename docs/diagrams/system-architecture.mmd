@@ -1,0 +1,15 @@
+flowchart LR
+    U[User / Admin Browser] -->|HTTPS| FE[Next.js Frontend<br/>React + Tailwind + shadcn/ui]
+    FE -->|REST / JSON| BE[Express.js Backend API]
+    BE -->|Prisma ORM| DB[(PostgreSQL)]
+    BE -->|Google Drive API| GD[(Google Drive<br/>files and PDFs)]
+    BE --> PDF[Puppeteer<br/>PDF renderer]
+    PDF -->|generated PDF| BE
+    BE --> NT[Notification service]
+    subgraph Azure
+        FE
+        BE
+        PDF
+        DB
+        NT
+    end

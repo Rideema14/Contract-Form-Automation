@@ -1,0 +1,15 @@
+flowchart TD
+    S[Form submitted] --> L1[Approver level 1 notified]
+    L1 --> D1{Decision}
+    D1 -- Approve --> L2[Approver level 2 notified]
+    D1 -- Return with comment --> R[Returned to creator]
+    D1 -- Reject with comment --> X[Rejected]
+    L2 --> D2{Decision}
+    D2 -- Approve --> LN[... next level ...]
+    D2 -- Return with comment --> R
+    D2 -- Reject with comment --> X
+    LN --> FIN[Final approval]
+    FIN --> OK[Status: Approved]
+    R --> ED[Creator edits and resubmits]
+    ED --> L1
+    OK --> PDFG[Generate and store PDF]
