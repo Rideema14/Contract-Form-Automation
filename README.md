@@ -1,3 +1,4 @@
+
 # Contract Forms Automation
 
 > **Current status: setup and documentation stage.** The repository structure and technical documentation are complete. **No application features are implemented yet**, and Google Drive and Azure are **not configured**.
@@ -106,3 +107,6 @@ Diagram sources are in [docs/diagrams/](docs/diagrams/).
 | Azure deployment | Not started |
 | Google Drive integration | Not started |
 | PDF generation | Blocked on company sample PDF |
+=======
+# Contract-Form-Automation
+
