@@ -21,11 +21,11 @@ A web application that lets staff create contract forms, route them through a se
 ## Technology Stack
 | Layer | Technology |
 |---|---|
-| Frontend | Next.js, React, JavaScript, Tailwind CSS, shadcn/ui |
+| Frontend | Next.js, React, TypeScript, Tailwind CSS, shadcn/ui |
 | Backend | Node.js, Express.js, REST APIs |
 | Database | PostgreSQL, Prisma ORM |
 | Validation / forms | Zod, React Hook Form |
-| Integrations | Google Drive API, Puppeteer, Microsoft Azure |
+| Integrations | Google Drive API, PDFMake, Microsoft Azure |
 
 ## Repository Structure
 ```text
@@ -46,12 +46,12 @@ Full guide: [docs/17-setup-guide.md](docs/17-setup-guide.md). Summary (Windows P
 4. Copy environment files and fill in values.
 5. Install dependencies and run backend and frontend.
 
-> `package.json` files do not exist yet; they will be created when implementation starts.
+> Backend and frontend `package.json` files exist; run `npm install` in each folder.
 
 ## Environment Configuration
 ```powershell
-Copy-Item .env.example backend\.env
-Copy-Item .env.example frontend\.env.local
+Copy-Item backend\.env.example backend\.env
+Copy-Item frontend\.env.example frontend\.env.local
 ```
 Replace every `<PLACEHOLDER>` with your own values. Never commit real secrets.
 
@@ -66,7 +66,7 @@ npx prisma db seed
 ## Running the Application (once implemented)
 ```powershell
 # Terminal 1
-cd backend; npm run dev      # http://localhost:5000
+cd backend; npm run dev      # http://localhost:4000
 # Terminal 2
 cd frontend; npm run dev     # http://localhost:3000
 ```
