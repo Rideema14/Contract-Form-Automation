@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import prisma from '../../config/prisma';
+import { prisma } from '../../lib/prisma';
 import { loginSchema } from './auth.validator';
 
 const COOKIE_NAME = 'contract_token';

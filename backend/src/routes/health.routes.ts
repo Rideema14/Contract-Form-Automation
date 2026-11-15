@@ -5,6 +5,7 @@ const router = Router();
 
 router.get("/", (_req, res) => {
   res.status(200).json({
+    status: "ok",
     success: true,
     message: "Backend is running",
     service: "contract-forms-api"
