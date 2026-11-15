@@ -1,4 +1,3 @@
-
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -36,9 +35,6 @@ export async function login(
 
     const user = await prisma.user.findUnique({
       where: { email },
-      include: {
-        role: true,
-      },
     });
 
     if (
@@ -62,7 +58,9 @@ export async function login(
     const token = jwt.sign(
       { sub: user.id },
       secret,
-      { expiresIn: (process.env.JWT_EXPIRES_IN ?? '8h') as jwt.SignOptions['expiresIn'] }
+      {
+        expiresIn: (process.env.JWT_EXPIRES_IN ?? '8h') as jwt.SignOptions['expiresIn'],
+      }
     );
 
     res.cookie(COOKIE_NAME, token, cookieOptions);
@@ -72,9 +70,9 @@ export async function login(
       message: 'Login successful',
       user: {
         id: user.id,
-        name: user.name,
+        name: user.fullName,
         email: user.email,
-        role: user.role.name,
+        role: user.role,
       },
     });
   } catch (error) {
@@ -114,11 +112,10 @@ export async function getCurrentUser(
       where: { id: req.authUser.id },
       select: {
         id: true,
-        name: true,
+        fullName: true,
         email: true,
         isActive: true,
-        role: { select: { name: true } },
-        department: { select: { id: true, name: true } },
+        role: true,
       },
     });
 
@@ -132,7 +129,10 @@ export async function getCurrentUser(
 
     res.status(200).json({
       success: true,
-      user,
+      user: {
+        ...user,
+        name: user.fullName,
+      },
     });
   } catch (error) {
     next(error);
