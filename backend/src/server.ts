@@ -1,18 +1,17 @@
-import './config/env';
-import app from './app';
-import prisma from './config/prisma';
+import app from "./app";
+import { env } from "./config/env";
+import { prisma } from "./lib/prisma";
 
-const PORT = Number(process.env.PORT) || 4000;
-
-const server = app.listen(PORT, () => {
-  console.log(`Contract Forms API running at http://localhost:${PORT}`);
+const server = app.listen(env.port, () => {
+  console.log(`API listening on port ${env.port}`);
 });
 
-const shutdown = async () => {
-  server.close();
-  await prisma.$disconnect();
-  process.exit(0);
-};
+async function shutdown() {
+  server.close(async () => {
+    await prisma.$disconnect();
+    process.exit(0);
+  });
+}
 
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);

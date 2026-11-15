@@ -1,108 +1,66 @@
 # Contract Forms Automation
 
-> **Current status: setup and documentation stage.** The repository structure and technical documentation are complete. **No application features are implemented yet**, and Google Drive and Azure are **not configured**.
+Web application that digitizes contract approval forms: create a request, add bidders and cost rows,
+attach supporting documents (private Google Drive), route it through approval, and generate the final PDF.
 
-## Introduction
-A web application that lets staff create contract forms, route them through a sequential approval workflow, store supporting documents in Google Drive, and generate a completed contract PDF. Built by three full-stack developers as a company assessment deliverable.
+**Status:** local project foundation only. Business modules (auth, contracts, approvals, Drive, PDF,
+dashboard) are placeholders. Azure is not created yet. Planned files are placeholders, not completed features.
 
-## Features (planned)
-- User/Admin authentication and role-based access control
-- Contract form creation, editing and draft saving
-- Dashboard (total, draft, pending approval, approved, rejected/returned) and searchable contract register
-- Vendors with type autocomplete; repeatable bidders and quotations
-- Technical and commercial evaluations; cost estimates with Excel upload
-- Sequential approval (approve / return / reject with comments), history and audit trail
-- Notifications to the next approver
-- Supporting document uploads in Google Drive; authorized view/download
-- PDF generation following the company's sample form
-- Azure deployment
+## Stack
+Next.js (App Router) + React + TypeScript + Tailwind + shadcn/ui | Express + TypeScript | PostgreSQL + Prisma |
+Google Drive API | PDFMake | Vitest + Supertest
 
-## Technology Stack
-| Layer | Technology |
-|---|---|
-| Frontend | Next.js, React, TypeScript, Tailwind CSS, shadcn/ui |
-| Backend | Node.js, Express.js, REST APIs |
-| Database | PostgreSQL, Prisma ORM |
-| Validation / forms | Zod, React Hook Form |
-| Integrations | Google Drive API, PDFMake, Microsoft Azure |
+## Architecture
+Browser -> Next.js (`localhost:3000`) -> Express API (`localhost:4000`) -> Prisma -> PostgreSQL (`localhost:5432`).
+Express calls Google Drive over HTTPS; PDFMake runs inside Express. The browser never touches PostgreSQL or private Google credentials.
 
-## Repository Structure
-```text
-contract-automation/
-├── frontend/    Next.js app (app/, components/, services/, hooks/, lib/, schemas/, styles/)
-├── backend/     Express API (src/modules/*, prisma/, tests/)
-├── docs/        Project documentation and Mermaid diagrams
-├── .env.example Placeholder environment variables
-└── README.md
-```
-Full detail: [docs/04-folder-structure.md](docs/04-folder-structure.md).
+## Prerequisites
+Node.js 24 (`.nvmrc`), npm (do not mix npm/pnpm/yarn), Git, PostgreSQL, PowerShell on Windows.
 
-## Local Setup
-Full guide: [docs/17-setup-guide.md](docs/17-setup-guide.md). Summary (Windows PowerShell):
-1. Install Node.js LTS, PostgreSQL and Git.
-2. Clone the repository.
-3. Create a local database.
-4. Copy environment files and fill in values.
-5. Install dependencies and run backend and frontend.
+## Run locally
+Full steps are in [`docs/local-setup.md`](docs/local-setup.md). In short:
 
-> Backend and frontend `package.json` files exist; run `npm install` in each folder.
-
-## Environment Configuration
 ```powershell
-Copy-Item backend\.env.example backend\.env
-Copy-Item frontend\.env.example frontend\.env.local
+cd backend;  npm install; npx prisma generate; npx prisma migrate dev; npm run dev
+cd frontend; npm install; npm run dev
 ```
-Replace every `<PLACEHOLDER>` with your own values. Never commit real secrets.
+Check: `http://localhost:4000/api/health`, `http://localhost:4000/api/health/db`, then open `http://localhost:3000`.
 
-## Database Setup (once implemented)
-```powershell
-cd backend
-npx prisma generate
-npx prisma migrate dev
-npx prisma db seed
+## Environment variables
+Copy `backend/.env.example` -> `backend/.env` and `frontend/.env.example` -> `frontend/.env.local`.
+Only `NEXT_PUBLIC_API_BASE_URL` belongs in the frontend (it is public). Never commit `.env` files or
+`backend/secrets/`.
+
+## Repository structure
+```
+contract-forms-automation/
+  README.md  .gitignore  .editorconfig  .nvmrc
+  docs/        architecture, api-contract, database-schema, google-drive-setup,
+               pdf-template-spec, local-setup, deployment-azure
+  .github/workflows/   ci.yml, deploy-frontend.yml, deploy-backend.yml
+  frontend/    Next.js app (src/app, components, features, lib, hooks, types, middleware.ts)
+  backend/     Express API (src/{config,routes,controllers,services,repositories,middleware,schemas,utils,types,lib},
+               prisma/, uploads/, generated/, tests/)
 ```
 
-## Running the Application (once implemented)
-```powershell
-# Terminal 1
-cd backend; npm run dev      # http://localhost:4000
-# Terminal 2
-cd frontend; npm run dev     # http://localhost:3000
-```
+## Backend scripts (run from `backend/`)
+`dev`, `build`, `start`, `typecheck`, `test`, `test:watch`, `db:generate`, `db:migrate`, `db:deploy`, `db:seed`, `db:studio`.
 
-## Testing
-Strategy and checklist: [docs/13-testing-strategy.md](docs/13-testing-strategy.md). Test commands will be added when the test tooling is agreed (`npm test` in `backend/`).
+## Git workflow
+Branch from `main` (`feature/auth`, `feature/contracts`, `feature/approvals`, `feature/google-drive-pdf`, `chore/...`).
+Use pull requests and reviews; never push directly to `main`.
 
-## Documentation
-| Doc | Topic |
+## Troubleshooting
+| Problem | Check / fix |
 |---|---|
-| [01](docs/01-project-overview.md) | Project overview |
-| [02](docs/02-requirements.md) | Requirements and open questions |
-| [03](docs/03-system-architecture.md) | System architecture |
-| [04](docs/04-folder-structure.md) | Folder structure |
-| [05](docs/05-database-design.md) | Database design |
-| [06](docs/06-api-documentation.md) | API documentation (proposed) |
-| [07](docs/07-user-workflow.md) | User workflow |
-| [08](docs/08-approval-workflow.md) | Approval workflow |
-| [09](docs/09-google-drive-integration.md) | Google Drive integration |
-| [10](docs/10-pdf-generation.md) | PDF generation |
-| [11](docs/11-azure-deployment.md) | Azure deployment |
-| [12](docs/12-security-and-rbac.md) | Security and RBAC |
-| [13](docs/13-testing-strategy.md) | Testing strategy |
-| [14](docs/14-team-responsibilities.md) | Team responsibilities |
-| [15](docs/15-four-phase-implementation-plan.md) | Four-phase plan |
-| [16](docs/16-git-workflow.md) | Git workflow |
-| [17](docs/17-setup-guide.md) | Setup guide |
+| node or npm not recognized | Reopen PowerShell after install; verify PATH |
+| Port 3000 or 4000 in use | Stop the other process or change the port and matching API URL / CORS origin |
+| Prisma cannot find DATABASE_URL | Run Prisma commands from `backend/`; confirm `backend/.env` exists |
+| Database connection refused | Start the PostgreSQL service; check port 5432 and credentials |
+| CORS browser error | `FRONTEND_ORIGIN` must equal `http://localhost:3000`; no wildcard with credentials |
+| Google Drive permission denied | Share the folder with the service account; confirm Drive API and folder ID |
+| Secrets committed | Rotate/revoke immediately, purge from history, add to `.gitignore` |
 
-Diagram sources are in [docs/diagrams/](docs/diagrams/).
-
-## Current Implementation Status
-| Area | Status |
-|---|---|
-| Repository structure | Done |
-| Documentation | Done (draft; pending company clarifications) |
-| Backend / Frontend code | Not started |
-| Database schema | Proposed only |
-| Azure deployment | Not started |
-| Google Drive integration | Not started |
-| PDF generation | Blocked on company sample PDF |
+## Definition of done
+A teammate who did not create the repo can clone it, install dependencies, create their local database,
+run migrations, start both apps, see the frontend reach the backend, and confirm `/api/health/db`.
