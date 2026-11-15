@@ -1,21 +1,14 @@
-@'
-# Dependencies
 node_modules/
-
-# Environment variables and secrets
 .env
 .env.*
 !.env.example
-
-# Build output
 dist/
 build/
 coverage/
-
-# Logs
 *.log
 npm-debug.log*
-
-# Testing
 .nyc_output/
-'@ | Set-Content .\backend\.gitignore -Encoding utf8
+secrets/
+generated/
+uploads/*
+!uploads/.gitkeep

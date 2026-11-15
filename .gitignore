@@ -4,6 +4,7 @@ node_modules/
 .env
 .env.*
 !.env.example
+!.env.local.example
 # Builds
 .next/
 out/
@@ -17,10 +18,13 @@ npm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
-# Uploads / temp / secrets
+# Secrets / uploads / generated files
+backend/secrets/
+backend/generated/
+backend/uploads/*
+!backend/uploads/.gitkeep
 tmp/
-uploads/
 *.pem
-service-account*.json
+*service-account*.json
 # Test coverage
 coverage/

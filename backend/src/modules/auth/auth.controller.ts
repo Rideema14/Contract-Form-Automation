@@ -62,7 +62,7 @@ export async function login(
     const token = jwt.sign(
       { sub: user.id },
       secret,
-      { expiresIn: '8h' }
+      { expiresIn: (process.env.JWT_EXPIRES_IN ?? '8h') as jwt.SignOptions['expiresIn'] }
     );
 
     res.cookie(COOKIE_NAME, token, cookieOptions);
