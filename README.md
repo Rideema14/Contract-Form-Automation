@@ -1,3 +1,4 @@
+﻿
 # Contract Forms Automation
 
 Web application that digitizes contract approval forms: create a request, add bidders and cost rows,
