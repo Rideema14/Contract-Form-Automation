@@ -1,0 +1,9 @@
+# Placeholder: Azure frontend deployment is added after local development and acceptance tests pass.
+name: Deploy Frontend (not configured)
+on:
+  workflow_dispatch:
+jobs:
+  placeholder:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Azure deployment is not configured yet."

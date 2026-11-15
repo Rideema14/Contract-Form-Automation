@@ -1,15 +1,17 @@
-
 import { Request, Response, NextFunction } from 'express';
-import jwt, { JwtPayload } from 'jsonwebtoken';
-import prisma from '../config/prisma';
+import jwt from 'jsonwebtoken';
 
 const COOKIE_NAME = 'contract_token';
 
-export default async function authenticate(
+interface AuthTokenPayload {
+  sub: string;
+}
+
+export default function authenticate(
   req: Request,
   res: Response,
   next: NextFunction
-): Promise<void> {
+): void {
   try {
     const token = req.cookies?.[COOKIE_NAME];
 
@@ -23,13 +25,13 @@ export default async function authenticate(
 
     const secret = process.env.JWT_SECRET;
 
-    if (!secret) {
-      throw new Error('JWT_SECRET is not configured');
+    if (!secret || secret.length < 32) {
+      throw new Error('JWT_SECRET must contain at least 32 characters');
     }
 
-    const decoded = jwt.verify(token, secret) as JwtPayload;
+    const decoded = jwt.verify(token, secret) as AuthTokenPayload;
 
-    if (typeof decoded.sub !== 'string') {
+    if (!decoded.sub || typeof decoded.sub !== 'string') {
       res.status(401).json({
         success: false,
         message: 'Invalid authentication token',
@@ -37,28 +39,9 @@ export default async function authenticate(
       return;
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.sub },
-      select: {
-        id: true,
-        isActive: true,
-        role: {
-          select: { name: true },
-        },
-      },
-    });
-
-    if (!user || !user.isActive) {
-      res.status(401).json({
-        success: false,
-        message: 'User account is inactive or unavailable',
-      });
-      return;
-    }
-
     req.authUser = {
-      id: user.id,
-      role: user.role.name,
+      id: decoded.sub,
+      role: '',
     };
 
     next();
