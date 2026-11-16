@@ -2,9 +2,14 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
+import crypto from "crypto";
+import { Prisma } from "@prisma/client";
 import { env } from "./config/env";
 import healthRoutes from "./routes/health.routes";
+import contractsRoutes from "./routes/contracts.routes";
 import authRoutes from "./modules/auth/auth.routes";
+import { AppError } from "./utils/app-error";
+import notFoundHandler from "./middleware/notFound";
 
 const app = express();
 
@@ -18,16 +23,42 @@ app.use(cors({
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+app.use((req, _res, next) => {
+  req.requestId = crypto.randomUUID();
+  next();
+});
 
 app.use("/api/health", healthRoutes);
 app.use("/api/auth", authRoutes);
+app.use("/api/forms", contractsRoutes);
+app.use(notFoundHandler);
 
-app.use((err: unknown, _req: express.Request, res: express.Response,
+app.use((err: unknown, req: express.Request, res: express.Response,
   _next: express.NextFunction) => {
   console.error(err);
+  if (err instanceof AppError) {
+    res.status(err.statusCode).json({
+      success: false,
+      message: err.message,
+      error: { code: err.code, details: err.details },
+      meta: { requestId: req.requestId },
+    });
+    return;
+  }
+  if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+    res.status(409).json({
+      success: false,
+      message: "A record with the same unique value already exists",
+      error: { code: "CONFLICT", details: [] },
+      meta: { requestId: req.requestId },
+    });
+    return;
+  }
   res.status(500).json({
     success: false,
-    message: "Internal server error"
+    message: "Internal server error",
+    error: { code: "INTERNAL_ERROR", details: [] },
+    meta: { requestId: req.requestId },
   });
 });
 

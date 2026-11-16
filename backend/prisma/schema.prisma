@@ -13,13 +13,273 @@ enum UserRole {
   APPROVER
 }
 
+enum ContractStatus {
+  DRAFT
+  PENDING_APPROVAL
+  RETURNED
+  APPROVED
+  REJECTED
+}
+
+enum ApprovalStatus {
+  WAITING
+  PENDING
+  APPROVED
+  RETURNED
+  REJECTED
+}
+
+enum ApprovalDecisionValue {
+  APPROVED
+  RETURNED
+  REJECTED
+}
+
+enum AttachmentCategory {
+  SUPPORTING
+  COST_ESTIMATE_EXCEL
+  GENERATED_PDF
+}
+
+enum EvaluationType {
+  TECHNICAL
+  COMMERCIAL
+}
+
 model User {
-  id           String   @id @default(uuid())
-  fullName     String
-  email        String   @unique
-  passwordHash String
-  role         UserRole @default(SUBMITTER)
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                  String             @id @default(uuid())
+  fullName            String
+  email               String             @unique
+  passwordHash        String
+  role                UserRole           @default(SUBMITTER)
+  isActive            Boolean            @default(true)
+  departmentId        String?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  department          Department?        @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  createdForms        ContractForm[]     @relation("ContractFormCreator")
+  approvalSteps       ApprovalStep[]
+  approvalDecisions   ApprovalDecision[]
+  uploadedAttachments Attachment[]
+  evaluations         Evaluation[]
+  auditLogs           AuditLog[]
+  notifications       Notification[]
+
+  @@index([departmentId])
+}
+
+model Department {
+  id            String         @id @default(uuid())
+  name          String         @unique
+  users         User[]
+  contractForms ContractForm[]
+}
+
+model ContractCategory {
+  id            String         @id @default(uuid())
+  name          String         @unique
+  contractForms ContractForm[]
+}
+
+model VendorType {
+  id      String   @id @default(uuid())
+  name    String   @unique
+  vendors Vendor[]
+}
+
+model Currency {
+  id            String         @id @default(uuid())
+  code          String         @unique
+  name          String
+  contractForms ContractForm[]
+  quotations    Quotation[]
+}
+
+model Vendor {
+  id               String         @id @default(uuid())
+  name             String
+  vendorTypeId     String
+  contactDetails   Json?
+  createdAt        DateTime       @default(now())
+  vendorType       VendorType     @relation(fields: [vendorTypeId], references: [id], onDelete: Restrict)
+  recommendedForms ContractForm[] @relation("RecommendedVendor")
+  bidders          Bidder[]
+
+  @@index([vendorTypeId])
+}
+
+model ContractForm {
+  id                   String             @id @default(uuid())
+  referenceNo          String?            @unique
+  title                String?
+  sponsorDepartmentId  String?
+  contractCategoryId   String?
+  scope                String?
+  procurementRationale String?
+  contractAmount       Decimal?           @db.Decimal(19, 4)
+  currencyId           String?
+  recommendedVendorId  String?
+  selectionRationale   String?
+  status               ContractStatus     @default(DRAFT)
+  createdById          String
+  submittedAt          DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  createdBy            User               @relation("ContractFormCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  sponsorDepartment    Department?        @relation(fields: [sponsorDepartmentId], references: [id], onDelete: Restrict)
+  contractCategory     ContractCategory?  @relation(fields: [contractCategoryId], references: [id], onDelete: Restrict)
+  currency             Currency?          @relation(fields: [currencyId], references: [id], onDelete: Restrict)
+  recommendedVendor    Vendor?            @relation("RecommendedVendor", fields: [recommendedVendorId], references: [id], onDelete: Restrict)
+  bidders              Bidder[]
+  evaluations          Evaluation[]
+  costLines            CostLine[]
+  attachments          Attachment[]
+  approvalSteps        ApprovalStep[]
+  approvalDecisions    ApprovalDecision[]
+  auditLogs            AuditLog[]
+  notifications        Notification[]
+
+  @@index([status, createdById])
+  @@index([sponsorDepartmentId])
+  @@index([contractCategoryId])
+  @@index([createdAt])
+}
+
+model Bidder {
+  id             String       @id @default(uuid())
+  contractFormId String
+  vendorId       String
+  sortOrder      Int
+  contractForm   ContractForm @relation(fields: [contractFormId], references: [id], onDelete: Restrict)
+  vendor         Vendor       @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  quotations     Quotation[]
+  evaluations    Evaluation[]
+
+  @@unique([contractFormId, sortOrder])
+  @@unique([id, contractFormId])
+  @@index([vendorId])
+}
+
+model Quotation {
+  id            String    @id @default(uuid())
+  bidderId      String
+  quotedAmount  Decimal   @db.Decimal(19, 4)
+  currencyId    String?
+  quotationDate DateTime?
+  notes         String?
+  bidder        Bidder    @relation(fields: [bidderId], references: [id], onDelete: Restrict)
+  currency      Currency? @relation(fields: [currencyId], references: [id], onDelete: Restrict)
+
+  @@index([bidderId])
+  @@index([currencyId])
+}
+
+model Evaluation {
+  id             String         @id @default(uuid())
+  contractFormId String
+  bidderId       String
+  type           EvaluationType
+  score          Decimal?       @db.Decimal(10, 4)
+  remarks        String?
+  evaluatedById  String?
+  contractForm   ContractForm   @relation(fields: [contractFormId], references: [id], onDelete: Restrict)
+  bidder         Bidder         @relation(fields: [bidderId, contractFormId], references: [id, contractFormId], onDelete: Restrict)
+  evaluatedBy    User?          @relation(fields: [evaluatedById], references: [id], onDelete: Restrict)
+
+  @@index([contractFormId])
+  @@index([bidderId])
+  @@index([evaluatedById])
+}
+
+model CostLine {
+  id             String       @id @default(uuid())
+  contractFormId String
+  description    String
+  quantity       Decimal?     @db.Decimal(19, 4)
+  unitCost       Decimal?     @db.Decimal(19, 4)
+  amount         Decimal      @db.Decimal(19, 4)
+  sortOrder      Int
+  contractForm   ContractForm @relation(fields: [contractFormId], references: [id], onDelete: Restrict)
+
+  @@unique([contractFormId, sortOrder])
+}
+
+model Attachment {
+  id             String             @id @default(uuid())
+  contractFormId String
+  category       AttachmentCategory
+  fileName       String
+  mimeType       String
+  sizeBytes      Int
+  driveFileId    String             @unique
+  uploadedById   String
+  createdAt      DateTime           @default(now())
+  contractForm   ContractForm       @relation(fields: [contractFormId], references: [id], onDelete: Restrict)
+  uploadedBy     User               @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+
+  @@index([contractFormId, category])
+  @@index([uploadedById])
+}
+
+model ApprovalStep {
+  id             String             @id @default(uuid())
+  contractFormId String
+  level          Int
+  approverId     String
+  status         ApprovalStatus     @default(WAITING)
+  actedAt        DateTime?
+  contractForm   ContractForm       @relation(fields: [contractFormId], references: [id], onDelete: Restrict)
+  approver       User               @relation(fields: [approverId], references: [id], onDelete: Restrict)
+  decisions      ApprovalDecision[]
+
+  @@unique([contractFormId, level])
+  @@unique([id, contractFormId])
+  @@index([approverId, status])
+}
+
+model ApprovalDecision {
+  id             String                @id @default(uuid())
+  approvalStepId String
+  contractFormId String
+  actorId        String
+  decision       ApprovalDecisionValue
+  comment        String?
+  createdAt      DateTime              @default(now())
+  approvalStep   ApprovalStep          @relation(fields: [approvalStepId, contractFormId], references: [id, contractFormId], onDelete: Restrict)
+  contractForm   ContractForm          @relation(fields: [contractFormId], references: [id], onDelete: Restrict)
+  actor          User                  @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([contractFormId, createdAt])
+  @@index([actorId])
+}
+
+model AuditLog {
+  id             String        @id @default(uuid())
+  actorId        String
+  action         String
+  entityType     String
+  entityId       String
+  contractFormId String?
+  details        Json?
+  createdAt      DateTime      @default(now())
+  actor          User          @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  contractForm   ContractForm? @relation(fields: [contractFormId], references: [id], onDelete: Restrict)
+
+  @@index([entityType, entityId])
+  @@index([contractFormId])
+}
+
+model Notification {
+  id             String       @id @default(uuid())
+  recipientId    String
+  contractFormId String
+  message        String
+  isRead         Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  channel        String?
+  recipient      User         @relation(fields: [recipientId], references: [id], onDelete: Restrict)
+  contractForm   ContractForm @relation(fields: [contractFormId], references: [id], onDelete: Restrict)
+
+  @@index([recipientId, isRead, createdAt])
+  @@index([contractFormId])
 }
