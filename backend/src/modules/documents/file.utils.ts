@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { getExtension } from './file.validator';
+import { WINDOWS_RESERVED, getExtension } from './file.validator';
 
 /** Maximum sanitised filename length in UTF-8 bytes (extension included). */
 export const DEFAULT_MAX_SANITIZED_BYTES = 180;
@@ -9,7 +9,6 @@ export const DEFAULT_MAX_SANITIZED_BYTES = 180;
 const FALLBACK_BASENAME = 'file';
 const MAX_EXTENSION_LENGTH = 10;
 const MAX_DUPLICATE_ATTEMPTS = 10_000;
-const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 
 export class InvalidFilenameError extends Error {
   constructor(message = 'Invalid filename') {

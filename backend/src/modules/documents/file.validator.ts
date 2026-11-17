@@ -49,7 +49,8 @@ export class FileValidationError extends Error {
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 const ILLEGAL_CHARS = /[<>:"|?*]/;
-const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+/** Windows reserved device names (CON, NUL, COM1, ...). Shared with file.utils.ts. */
+export const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 
 /**
  * Executable/script extensions. If one appears as an inner extension

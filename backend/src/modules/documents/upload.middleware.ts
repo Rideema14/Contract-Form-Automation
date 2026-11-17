@@ -1,19 +1,20 @@
-
 import multer, { MulterError } from 'multer';
+import type { ErrorRequestHandler, Request, RequestHandler } from 'express';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
 import {
   DocumentUploadConfig,
-  KNOWN_FILE_TYPES,
   DEFAULT_MAX_FILENAME_LENGTH,
 } from './document.config';
 
 import {
   FileValidationError,
   assertValidFile,
-  validateFilename,
+  validateFile,
+  validateFileCount,
+  type FileValidationIssue,
 } from './file.validator';
 
 import {
@@ -51,66 +52,31 @@ export function createDocumentUpload(config: DocumentUploadConfig) {
 
   return multer({
     storage,
+    // Keep the client's full path in file.originalname so validateFile can
+    // REJECT traversal attempts. By default Multer silently strips the
+    // directory part, which would hide them from the validator.
+    preservePath: true,
+    // Browsers send filenames as UTF-8; Multer's default (latin1) garbles
+    // accented and non-Latin names.
+    defParamCharset: 'utf8',
     limits: {
       fileSize: config.maxFileSizeBytes,
       files: config.maxFileCount,
     },
     fileFilter: (_req, file, callback) => {
-      const filenameIssues = validateFilename(
-        file.originalname,
-        config.maxFilenameLength
+      // Single source of truth: the same rules as file.validator.ts. The real
+      // size is unknown here (limits.fileSize enforces the maximum while
+      // streaming; zero-byte files are caught after upload), so pass 1.
+      const result = validateFile(
+        { originalName: file.originalname, mimeType: file.mimetype, size: 1 },
+        config
       );
-      const extension = path.extname(file.originalname)
-  .slice(1)
-  .toLowerCase();
 
-const mimeType = file.mimetype.trim().toLowerCase();
-
-if (!extension) {
-  callback(
-    new FileValidationError([
-      {
-        code: 'MISSING_EXTENSION',
-        message: 'The uploaded file must have an extension.',
-        filename: file.originalname,
-      },
-    ])
-  );
-  return;
-}
-
-if (!config.allowedExtensions.includes(extension)) {
-  callback(
-    new FileValidationError([
-      {
-        code: 'EXTENSION_NOT_ALLOWED',
-        message: `File extension ".${extension}" is not allowed.`,
-        filename: file.originalname,
-      },
-    ])
-  );
-  return;
-}
-
-if (!KNOWN_FILE_TYPES[extension]?.includes(mimeType)) {
-  callback(
-    new FileValidationError([
-      {
-        code: 'MIME_EXTENSION_MISMATCH',
-        message: 'File MIME type does not match its extension.',
-        filename: file.originalname,
-      },
-    ])
-  );
-  return;
-}
-
-      if (filenameIssues.length > 0) {
-        callback(new FileValidationError(filenameIssues));
-        return;
+      if (result.ok) {
+        callback(null, true);
+      } else {
+        callback(new FileValidationError(result.issues));
       }
-
-      callback(null, true);
     },
   });
 }
@@ -195,3 +161,87 @@ export function getDocumentUploadError(error: unknown): {
 
   return null;
 }
+
+/** Deletes the temporary files of a request. Never throws. */
+async function cleanupRequestFiles(req: Request): Promise<void> {
+  const files = Array.isArray(req.files) ? req.files : [];
+  await Promise.allSettled(files.map(cleanupTemporaryUpload));
+}
+
+/**
+ * Ready-to-mount middleware: Multer (rules from `config`) plus the checks that
+ * need the real file size (zero-byte files, file count).
+ *
+ * - On any rejection the temporary files are deleted and the error is passed
+ *   to next() (use documentUploadErrorHandler to turn it into a response).
+ * - On success req.files holds the saved files, which are deleted
+ *   automatically when the response closes. Move them to their final
+ *   destination (for example Google Drive) before responding.
+ *
+ * NOT connected to any route yet.
+ */
+export function createDocumentUploadMiddleware(
+  config: DocumentUploadConfig,
+  fieldName: string
+): RequestHandler {
+  if (typeof fieldName !== 'string' || fieldName.trim() === '') {
+    throw new TypeError('fieldName is required');
+  }
+  const upload = createDocumentUpload(config).array(fieldName);
+
+  return (req, res, next) => {
+    res.once('close', () => {
+      void cleanupRequestFiles(req);
+    });
+
+    upload(req, res, (error?: unknown) => {
+      const reject = (reason: unknown) => {
+        void cleanupRequestFiles(req).then(() => next(reason));
+      };
+
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      const files = Array.isArray(req.files) ? req.files : [];
+      const issues: FileValidationIssue[] = validateFileCount(files.length, config);
+
+      for (const file of files) {
+        const result = validateFile(
+          { originalName: file.originalname, mimeType: file.mimetype, size: file.size },
+          config
+        );
+        if (!result.ok) issues.push(...result.issues);
+      }
+
+      if (issues.length > 0) {
+        reject(new FileValidationError(issues));
+        return;
+      }
+
+      next();
+    });
+  };
+}
+
+/**
+ * Express error handler for upload errors. Other errors go to the next
+ * handler. The response shape is PROVISIONAL until the team agrees the shared
+ * error envelope; change it here, in one place.
+ */
+export const documentUploadErrorHandler: ErrorRequestHandler = (err, _req, res, next) => {
+  const info = getDocumentUploadError(err);
+
+  if (!info) {
+    next(err);
+    return;
+  }
+
+  res.status(info.statusCode).json({
+    success: false,
+    message: info.message,
+    code: info.code,
+    ...(err instanceof FileValidationError ? { issues: err.issues } : {}),
+  });
+};
