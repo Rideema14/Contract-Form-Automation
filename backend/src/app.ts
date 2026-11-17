@@ -7,6 +7,7 @@ import { Prisma } from "@prisma/client";
 import { env } from "./config/env";
 import healthRoutes from "./routes/health.routes";
 import contractsRoutes from "./routes/contracts.routes";
+import referenceDataRoutes from "./routes/reference-data.routes";
 import authRoutes from "./modules/auth/auth.routes";
 import { AppError } from "./utils/app-error";
 import notFoundHandler from "./middleware/notFound";
@@ -31,6 +32,7 @@ app.use((req, _res, next) => {
 app.use("/api/health", healthRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/forms", contractsRoutes);
+app.use("/api/reference-data", referenceDataRoutes);
 app.use(notFoundHandler);
 
 app.use((err: unknown, req: express.Request, res: express.Response,

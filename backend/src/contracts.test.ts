@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ContractStatus, UserRole } from '@prisma/client';
+import { ContractStatus, Prisma, UserRole } from '@prisma/client';
 import { prisma } from './lib/prisma';
 import {
   bidderSchema,
@@ -8,9 +8,11 @@ import {
 } from './schemas/contract.schema';
 import {
   createDraft,
+  getCostEstimate,
   getContract,
   listContracts,
   deleteBidder,
+  submitContract,
   updateBidder,
   updateQuotation,
   updateContract,
@@ -42,6 +44,112 @@ describe('contract request validation', () => {
 });
 
 describe('contract service authorization and persistence', () => {
+  const completeForm = {
+    id: 'form-1',
+    createdById: submitter.id,
+    status: ContractStatus.DRAFT,
+    title: 'Project',
+    sponsorDepartmentId: 'department-1',
+    contractCategoryId: 'category-1',
+    scope: 'Scope',
+    procurementRationale: 'Rationale',
+    contractAmount: new Prisma.Decimal('30.00'),
+    recommendedVendorId: null,
+    selectionRationale: null,
+    bidders: [{
+      id: 'bidder-1',
+      quotations: [{ quotedAmount: new Prisma.Decimal('30.00') }],
+    }],
+    evaluations: [
+      { bidderId: 'bidder-1', type: 'TECHNICAL', score: new Prisma.Decimal('1'), remarks: 'Pass' },
+      { bidderId: 'bidder-1', type: 'COMMERCIAL', score: new Prisma.Decimal('1'), remarks: 'Pass' },
+    ],
+    costLines: [{
+      id: 'line-1',
+      amount: new Prisma.Decimal('30.00'),
+      quantity: new Prisma.Decimal('2.00'),
+      unitCost: new Prisma.Decimal('15.00'),
+    }],
+  };
+
+  it('submits a complete draft with a concurrency-safe state transition', async () => {
+    const findUnique = vi.spyOn(prisma.contractForm, 'findUnique')
+      .mockResolvedValueOnce(completeForm as never)
+      .mockResolvedValueOnce(completeForm as never);
+    const updateMany = vi.spyOn(prisma.contractForm, 'updateMany').mockResolvedValue({ count: 1 });
+    const findUniqueOrThrow = vi.spyOn(prisma.contractForm, 'findUniqueOrThrow').mockResolvedValue({
+      ...completeForm,
+      status: ContractStatus.PENDING_APPROVAL,
+    } as never);
+
+    await expect(submitContract('form-1', submitter)).resolves.toMatchObject({
+      status: ContractStatus.PENDING_APPROVAL,
+    });
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'form-1', status: ContractStatus.DRAFT },
+    }));
+    findUnique.mockRestore();
+    findUniqueOrThrow.mockRestore();
+  });
+
+  it('rejects a submission with missing required fields', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: submitter.id,
+      status: ContractStatus.DRAFT,
+      title: null,
+    } as never);
+
+    await expect(submitContract('form-1', submitter)).rejects.toMatchObject({
+      statusCode: 400,
+      code: 'VALIDATION_ERROR',
+    });
+  });
+
+  it('rejects a duplicate submission after the form leaves an editable state', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: submitter.id,
+      status: ContractStatus.PENDING_APPROVAL,
+    } as never);
+
+    await expect(submitContract('form-1', submitter)).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'INVALID_STATE',
+    });
+  });
+
+  it('rejects submission by a non-owner', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: 'other-user',
+      status: ContractStatus.DRAFT,
+    } as never);
+
+    await expect(submitContract('form-1', submitter)).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'FORBIDDEN',
+    });
+  });
+
+  it('calculates decimal-safe cost totals without a tax assumption', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: submitter.id,
+      status: ContractStatus.DRAFT,
+    } as never);
+    vi.spyOn(prisma.costLine, 'findMany').mockResolvedValue([
+      { amount: new Prisma.Decimal('0.10') },
+      { amount: new Prisma.Decimal('0.20') },
+    ] as never);
+
+    await expect(getCostEstimate('form-1', submitter)).resolves.toMatchObject({
+      subtotal: new Prisma.Decimal('0.30'),
+      tax: new Prisma.Decimal('0'),
+      total: new Prisma.Decimal('0.30'),
+    });
+  });
+
   it('creates a draft owned by the authenticated user', async () => {
     const create = vi.spyOn(prisma.contractForm, 'create').mockResolvedValue({
       id: 'form-1',

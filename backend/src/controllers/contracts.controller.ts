@@ -7,8 +7,11 @@ import {
   contractListQuerySchema,
   costLineParamsSchema,
   costLineSchema,
+  evaluationSchema,
+  evaluationsSchema,
   quotationParamsSchema,
   quotationSchema,
+  submitSchema,
 } from '../schemas/contract.schema';
 import * as contractService from '../services/contract.service';
 import { AppError } from '../utils/app-error';
@@ -54,6 +57,36 @@ export async function updateContract(req: Request, res: Response, next: NextFunc
     const { id } = parse(contractIdSchema.safeParse(req.params));
     const data = await contractService.updateContract(id, user(req), parse(contractDraftSchema.safeParse(req.body)));
     sendSuccess(req, res, 200, 'Contract updated', data);
+  } catch (error) { next(error); }
+}
+
+export async function saveDraft(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { id } = parse(contractIdSchema.safeParse(req.params));
+    const data = await contractService.updateContract(id, user(req), parse(contractDraftSchema.safeParse(req.body)));
+    sendSuccess(req, res, 200, 'Draft saved', data);
+  } catch (error) { next(error); }
+}
+
+export async function listDrafts(req: Request, res: Response, next: NextFunction) {
+  try {
+    sendSuccess(req, res, 200, 'Drafts retrieved', { items: await contractService.listDrafts(user(req)) });
+  } catch (error) { next(error); }
+}
+
+export async function deleteContract(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { id } = parse(contractIdSchema.safeParse(req.params));
+    await contractService.deleteContract(id, user(req));
+    sendSuccess(req, res, 200, 'Contract deleted', { id });
+  } catch (error) { next(error); }
+}
+
+export async function submitContract(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { id } = parse(contractIdSchema.safeParse(req.params));
+    parse(submitSchema.safeParse(req.body));
+    sendSuccess(req, res, 200, 'Contract submitted', await contractService.submitContract(id, user(req)));
   } catch (error) { next(error); }
 }
 
@@ -141,5 +174,27 @@ export async function deleteCostLine(req: Request, res: Response, next: NextFunc
     const params = parse(costLineParamsSchema.safeParse(req.params));
     await contractService.deleteCostLine(params.formId, params.lineId, user(req));
     sendSuccess(req, res, 200, 'Cost line deleted', { id: params.lineId });
+  } catch (error) { next(error); }
+}
+
+export async function getCostEstimate(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { formId } = parse(costLineParamsSchema.pick({ formId: true }).safeParse(req.params));
+    sendSuccess(req, res, 200, 'Cost estimate retrieved', await contractService.getCostEstimate(formId, user(req)));
+  } catch (error) { next(error); }
+}
+
+export async function listEvaluations(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { formId } = parse(costLineParamsSchema.pick({ formId: true }).safeParse(req.params));
+    sendSuccess(req, res, 200, 'Evaluations retrieved', { items: await contractService.listEvaluations(formId, user(req)) });
+  } catch (error) { next(error); }
+}
+
+export async function saveEvaluations(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { formId } = parse(costLineParamsSchema.pick({ formId: true }).safeParse(req.params));
+    const body = req.body?.evaluations ? parse(evaluationsSchema.safeParse(req.body)).evaluations : [parse(evaluationSchema.safeParse(req.body))];
+    sendSuccess(req, res, 200, 'Evaluations saved', { items: await contractService.saveEvaluations(formId, user(req), body) });
   } catch (error) { next(error); }
 }
