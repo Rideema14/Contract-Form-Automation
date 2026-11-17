@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { NextFunction, Request, Response } from 'express';
 import {
   ApprovalDecisionValue,
   ApprovalStatus,
@@ -23,6 +24,15 @@ import {
   rejectStep,
   returnStep,
 } from './services/approval.service';
+import * as approvalService from './services/approval.service';
+import {
+  approveStepHandler,
+  getApprovalDetail,
+  getApprovalHistoryHandler,
+  listPendingApprovals,
+  rejectStepHandler,
+  returnStepHandler,
+} from './controllers/approvals.controller';
 
 const submitter = { id: 'user-submitter-1', role: UserRole.SUBMITTER, fullName: 'Alice Submitter' };
 const approver1 = { id: 'user-approver-1', role: UserRole.APPROVER, fullName: 'Bob Approver 1' };
@@ -833,5 +843,174 @@ describe('Approval Workflow Initialization, Validation, and Resubmission', () =>
         data: expect.objectContaining({ recipientId: submitter.id }),
       }),
     );
+  });
+});
+
+describe('Approvals Controller Handlers', () => {
+  const validUUID = '123e4567-e89b-12d3-a456-426614174000';
+
+  function createMockContext(overrides: {
+    authUser?: unknown;
+    params?: Record<string, string>;
+    query?: Record<string, string>;
+    body?: Record<string, unknown>;
+  } = {}) {
+    const req = {
+      requestId: 'test-req-id',
+      authUser: overrides.authUser !== undefined ? overrides.authUser : approver1,
+      params: overrides.params || {},
+      query: overrides.query || {},
+      body: overrides.body || {},
+    } as unknown as Request;
+
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn().mockReturnThis(),
+    } as unknown as Response;
+
+    const next = vi.fn() as NextFunction;
+
+    return { req, res, next };
+  }
+
+  it('listPendingApprovals requires authentication and returns formatted response', async () => {
+    // Unauthenticated
+    const unauthCtx = createMockContext({ authUser: null });
+    await listPendingApprovals(unauthCtx.req, unauthCtx.res, unauthCtx.next);
+    expect(unauthCtx.next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 401, code: 'AUTHENTICATION_REQUIRED' }));
+
+    // Invalid query validation
+    const invalidQueryCtx = createMockContext({ query: { pageSize: '200' } });
+    await listPendingApprovals(invalidQueryCtx.req, invalidQueryCtx.res, invalidQueryCtx.next);
+    expect(invalidQueryCtx.next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 400, code: 'VALIDATION_ERROR' }));
+
+    // Valid query
+    const validCtx = createMockContext({ query: { page: '1', pageSize: '10' } });
+    vi.spyOn(approvalService, 'getPendingApprovals').mockResolvedValue({
+      items: [{ id: 'step-1' }] as never,
+      pagination: { page: 1, pageSize: 10, totalItems: 1, totalPages: 1 },
+    });
+
+    await listPendingApprovals(validCtx.req, validCtx.res, validCtx.next);
+    expect(validCtx.res.status).toHaveBeenCalledWith(200);
+    expect(validCtx.res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      message: 'Pending approvals retrieved',
+      data: { items: [{ id: 'step-1' }] },
+      meta: expect.objectContaining({ pagination: { page: 1, pageSize: 10, totalItems: 1, totalPages: 1 } }),
+    }));
+  });
+
+  it('getApprovalDetail validates UUID and returns step details', async () => {
+    // Invalid UUID
+    const invalidCtx = createMockContext({ params: { id: 'invalid-id' } });
+    await getApprovalDetail(invalidCtx.req, invalidCtx.res, invalidCtx.next);
+    expect(invalidCtx.next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 400, code: 'VALIDATION_ERROR' }));
+
+    // Valid UUID
+    const validCtx = createMockContext({ params: { id: validUUID } });
+    vi.spyOn(approvalService, 'getApprovalStepDetail').mockResolvedValue({ id: validUUID } as never);
+
+    await getApprovalDetail(validCtx.req, validCtx.res, validCtx.next);
+    expect(validCtx.res.status).toHaveBeenCalledWith(200);
+    expect(validCtx.res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      message: 'Approval details retrieved',
+      data: { id: validUUID },
+    }));
+  });
+
+  it('approveStepHandler validates payload and calls service', async () => {
+    const validCtx = createMockContext({
+      params: { id: validUUID },
+      body: { comment: 'Approving this request' },
+    });
+    vi.spyOn(approvalService, 'approveStep').mockResolvedValue({
+      stepId: validUUID,
+      status: ApprovalStatus.APPROVED,
+      contractStatus: ContractStatus.PENDING_APPROVAL,
+    } as never);
+
+    await approveStepHandler(validCtx.req, validCtx.res, validCtx.next);
+    expect(validCtx.res.status).toHaveBeenCalledWith(200);
+    expect(validCtx.res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      message: 'Contract approved successfully',
+    }));
+  });
+
+  it('returnStepHandler enforces comment and calls service', async () => {
+    // Missing comment
+    const invalidCtx = createMockContext({
+      params: { id: validUUID },
+      body: { comment: '' },
+    });
+    await returnStepHandler(invalidCtx.req, invalidCtx.res, invalidCtx.next);
+    expect(invalidCtx.next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 400, code: 'VALIDATION_ERROR' }));
+
+    // Valid comment
+    const validCtx = createMockContext({
+      params: { id: validUUID },
+      body: { comment: 'Please adjust quotation notes' },
+    });
+    vi.spyOn(approvalService, 'returnStep').mockResolvedValue({
+      stepId: validUUID,
+      status: ApprovalStatus.RETURNED,
+    } as never);
+
+    await returnStepHandler(validCtx.req, validCtx.res, validCtx.next);
+    expect(validCtx.res.status).toHaveBeenCalledWith(200);
+    expect(validCtx.res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      message: 'Contract returned for changes',
+    }));
+  });
+
+  it('rejectStepHandler enforces comment and calls service', async () => {
+    // Missing comment
+    const invalidCtx = createMockContext({
+      params: { id: validUUID },
+      body: {},
+    });
+    await rejectStepHandler(invalidCtx.req, invalidCtx.res, invalidCtx.next);
+    expect(invalidCtx.next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 400, code: 'VALIDATION_ERROR' }));
+
+    // Valid comment
+    const validCtx = createMockContext({
+      params: { id: validUUID },
+      body: { comment: 'Vendor selection does not match procurement guidelines' },
+    });
+    vi.spyOn(approvalService, 'rejectStep').mockResolvedValue({
+      stepId: validUUID,
+      status: ApprovalStatus.REJECTED,
+    } as never);
+
+    await rejectStepHandler(validCtx.req, validCtx.res, validCtx.next);
+    expect(validCtx.res.status).toHaveBeenCalledWith(200);
+    expect(validCtx.res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      message: 'Contract rejected',
+    }));
+  });
+
+  it('getApprovalHistoryHandler validates formId and returns history', async () => {
+    // Invalid UUID
+    const invalidCtx = createMockContext({ params: { id: 'bad-uuid' } });
+    await getApprovalHistoryHandler(invalidCtx.req, invalidCtx.res, invalidCtx.next);
+    expect(invalidCtx.next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 400, code: 'VALIDATION_ERROR' }));
+
+    // Valid UUID
+    const validCtx = createMockContext({ params: { id: validUUID } });
+    vi.spyOn(approvalService, 'getApprovalHistory').mockResolvedValue({
+      contractFormId: validUUID,
+      approvalSteps: [],
+    } as never);
+
+    await getApprovalHistoryHandler(validCtx.req, validCtx.res, validCtx.next);
+    expect(validCtx.res.status).toHaveBeenCalledWith(200);
+    expect(validCtx.res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      message: 'Approval history retrieved',
+    }));
   });
 });
