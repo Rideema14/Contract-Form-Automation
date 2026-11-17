@@ -149,15 +149,15 @@ describe('createDocumentUploadMiddleware: rejected uploads', () => {
       .attach('files', bytes(10), { filename: 'virus.exe', contentType: 'application/octet-stream' });
 
     expect(res.status).toBe(400);
-    expect(res.body).toMatchObject({ success: false, code: 'DOCUMENT_VALIDATION_FAILED' });
-    expect(res.body.issues[0].code).toBe('EXTENSION_NOT_ALLOWED');
+    expect(res.body).toMatchObject({ success: false, error: { code: 'DOCUMENT_VALIDATION_FAILED' } });
+    expect(res.body.error.details[0].code).toBe('EXTENSION_NOT_ALLOWED');
     expect(await leftovers()).toEqual([]);
   });
 
   it('rejects a file without an extension', async () => {
     const res = await rawUpload('noextension');
     expect(res.status).toBe(400);
-    expect(res.body.issues[0].code).toBe('MISSING_EXTENSION');
+    expect(res.body.error.details[0].code).toBe('MISSING_EXTENSION');
   });
 
   it('rejects a MIME type that does not match the extension', async () => {
@@ -166,14 +166,14 @@ describe('createDocumentUploadMiddleware: rejected uploads', () => {
       .attach('files', bytes(10), { filename: 'sheet.xlsx', contentType: PDF });
 
     expect(res.status).toBe(400);
-    expect(res.body.issues[0].code).toBe('MIME_EXTENSION_MISMATCH');
+    expect(res.body.error.details[0].code).toBe('MIME_EXTENSION_MISMATCH');
     expect(await leftovers()).toEqual([]);
   });
 
   it('rejects a MIME type that is not allowed at all', async () => {
     const res = await rawUpload('a.pdf', bytes(10), 'application/zip');
     expect(res.status).toBe(400);
-    expect(res.body.issues[0].code).toBe('MIME_NOT_ALLOWED');
+    expect(res.body.error.details[0].code).toBe('MIME_NOT_ALLOWED');
   });
 
   it('rejects a file over the size limit and leaves no partial file', async () => {
@@ -182,7 +182,7 @@ describe('createDocumentUploadMiddleware: rejected uploads', () => {
       .attach('files', bytes(1025), { filename: 'big.pdf', contentType: PDF });
 
     expect(res.status).toBe(400);
-    expect(res.body.code).toBe('LIMIT_FILE_SIZE');
+    expect(res.body.error.code).toBe('LIMIT_FILE_SIZE');
     expect(await leftovers()).toEqual([]);
   });
 
@@ -194,7 +194,7 @@ describe('createDocumentUploadMiddleware: rejected uploads', () => {
       .attach('files', bytes(10), { filename: 'c.pdf', contentType: PDF });
 
     expect(res.status).toBe(400);
-    expect(res.body.code).toBe('LIMIT_FILE_COUNT');
+    expect(res.body.error.code).toBe('LIMIT_FILE_COUNT');
     expect(await leftovers()).toEqual([]);
   });
 
@@ -204,26 +204,26 @@ describe('createDocumentUploadMiddleware: rejected uploads', () => {
       .attach('files', Buffer.alloc(0), { filename: 'empty.pdf', contentType: PDF });
 
     expect(res.status).toBe(400);
-    expect(res.body.issues[0].code).toBe('EMPTY_FILE');
+    expect(res.body.error.details[0].code).toBe('EMPTY_FILE');
     expect(await leftovers()).toEqual([]);
   });
 
   it('rejects a request with no files', async () => {
     const res = await request(buildApp()).post('/upload').field('note', 'hello');
     expect(res.status).toBe(400);
-    expect(res.body.issues[0].code).toBe('NO_FILES');
+    expect(res.body.error.details[0].code).toBe('NO_FILES');
   });
 
   it('rejects a non-multipart request', async () => {
     const res = await request(buildApp()).post('/upload').send({ a: 1 });
     expect(res.status).toBe(400);
-    expect(res.body.issues[0].code).toBe('NO_FILES');
+    expect(res.body.error.details[0].code).toBe('NO_FILES');
   });
 
   it('treats an empty filename as no file and stores nothing', async () => {
     const res = await rawUpload('');
     expect(res.status).toBe(400);
-    expect(res.body.issues[0].code).toBe('NO_FILES');
+    expect(res.body.error.details[0].code).toBe('NO_FILES');
     expect(await leftovers()).toEqual([]);
   });
 
@@ -234,7 +234,7 @@ describe('createDocumentUploadMiddleware: rejected uploads', () => {
   ])('rejects the path traversal filename %s', async (filename) => {
     const res = await rawUpload(filename);
     expect(res.status).toBe(400);
-    expect(res.body.issues.map((i: { code: string }) => i.code)).toContain('PATH_TRAVERSAL');
+    expect(res.body.error.details.map((i: { code: string }) => i.code)).toContain('PATH_TRAVERSAL');
     expect(await leftovers()).toEqual([]);
   });
 
@@ -243,7 +243,7 @@ describe('createDocumentUploadMiddleware: rejected uploads', () => {
     async (filename) => {
       const res = await rawUpload(filename);
       expect(res.status).toBe(400);
-      expect(res.body.issues[0].code).toBe('DANGEROUS_FILENAME');
+      expect(res.body.error.details[0].code).toBe('DANGEROUS_FILENAME');
     }
   );
 
@@ -253,7 +253,7 @@ describe('createDocumentUploadMiddleware: rejected uploads', () => {
       .attach('attachment', bytes(10), { filename: 'a.pdf', contentType: PDF });
 
     expect(res.status).toBe(400);
-    expect(res.body.code).toBe('LIMIT_UNEXPECTED_FILE');
+    expect(res.body.error.code).toBe('LIMIT_UNEXPECTED_FILE');
     expect(await leftovers()).toEqual([]);
   });
 

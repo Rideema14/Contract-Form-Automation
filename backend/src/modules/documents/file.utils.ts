@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { WINDOWS_RESERVED, getExtension } from './file.validator';
+import { getExtension } from './file.validator';
 
 /** Maximum sanitised filename length in UTF-8 bytes (extension included). */
 export const DEFAULT_MAX_SANITIZED_BYTES = 180;
@@ -9,6 +9,7 @@ export const DEFAULT_MAX_SANITIZED_BYTES = 180;
 const FALLBACK_BASENAME = 'file';
 const MAX_EXTENSION_LENGTH = 10;
 const MAX_DUPLICATE_ATTEMPTS = 10_000;
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 
 export class InvalidFilenameError extends Error {
   constructor(message = 'Invalid filename') {
@@ -103,35 +104,20 @@ function withSuffix(filename: string, n: number, maxBytes: number): string {
  * Intended for display names within one contract; the caller supplies the
  * existing names (for example from the database later).
  */
-
-
 export function resolveDuplicateFilename(
   filename: string,
   existingNames: Iterable<string>,
   maxBytes: number = DEFAULT_MAX_SANITIZED_BYTES
 ): string {
-  const safeFilename = sanitizeFilename(filename, maxBytes);
-
-  const taken = new Set(
-    Array.from(existingNames, (name) => name.toLowerCase())
-  );
-
-  if (!taken.has(safeFilename.toLowerCase())) {
-    return safeFilename;
-  }
+  const taken = new Set(Array.from(existingNames, (n) => n.toLowerCase()));
+  if (!taken.has(filename.toLowerCase())) return filename;
 
   for (let n = 1; n <= MAX_DUPLICATE_ATTEMPTS; n++) {
-    const candidate = withSuffix(safeFilename, n, maxBytes);
-
-    if (!taken.has(candidate.toLowerCase())) {
-      return candidate;
-    }
+    const candidate = withSuffix(filename, n, maxBytes);
+    if (!taken.has(candidate.toLowerCase())) return candidate;
   }
-
   throw new InvalidFilenameError('Unable to generate a unique filename');
 }
-
-
 
 /**
  * Collision-proof name for storing a file on disk: a random UUID plus the

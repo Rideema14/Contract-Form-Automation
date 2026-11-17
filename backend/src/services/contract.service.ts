@@ -1,4 +1,4 @@
-import { ContractStatus, Prisma, UserRole } from '@prisma/client';
+﻿import { ContractStatus, Prisma, UserRole } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AppError } from '../utils/app-error';
 import { ContractDraftInput } from '../schemas/contract.schema';
@@ -55,6 +55,16 @@ async function getEditableForm(formId: string, user: AuthUser) {
   return form;
 }
 
+/**
+ * Reuse the contract's existing edit authorization for attachment uploads.
+ * Only the contract creator can upload while the form is DRAFT or RETURNED.
+ */
+export async function assertCanUploadAttachments(
+  formId: string,
+  user: AuthUser,
+): Promise<void> {
+  await getEditableForm(formId, user);
+}
 async function getAccessibleForm(formId: string, user: AuthUser) {
   assertAuthenticated(user);
   const form = await prisma.contractForm.findUnique({ where: { id: formId } });
@@ -510,3 +520,4 @@ export async function deleteCostLine(formId: string, lineId: string, user: AuthU
   if (!line) throw new AppError(404, 'COST_LINE_NOT_FOUND', 'Cost line not found');
   return prisma.$transaction(async (tx) => tx.costLine.delete({ where: { id: lineId } }));
 }
+

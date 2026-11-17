@@ -3,7 +3,7 @@ import type { ErrorRequestHandler, Request, RequestHandler } from 'express';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-
+import { sendError } from '../../utils/response';
 import {
   DocumentUploadConfig,
   DEFAULT_MAX_FILENAME_LENGTH,
@@ -230,18 +230,26 @@ export function createDocumentUploadMiddleware(
  * handler. The response shape is PROVISIONAL until the team agrees the shared
  * error envelope; change it here, in one place.
  */
-export const documentUploadErrorHandler: ErrorRequestHandler = (err, _req, res, next) => {
-  const info = getDocumentUploadError(err);
+export const documentUploadErrorHandler: ErrorRequestHandler = (
+  error,
+  req,
+  res,
+  next,
+) => {
+  const info = getDocumentUploadError(error);
 
+  // Let the application's global handler process unexpected errors.
   if (!info) {
-    next(err);
+    next(error);
     return;
   }
 
-  res.status(info.statusCode).json({
-    success: false,
-    message: info.message,
-    code: info.code,
-    ...(err instanceof FileValidationError ? { issues: err.issues } : {}),
-  });
+  sendError(
+    req,
+    res,
+    info.statusCode,
+    info.code,
+    info.message,
+    error instanceof FileValidationError ? error.issues : [],
+  );
 };

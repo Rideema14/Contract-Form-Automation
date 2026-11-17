@@ -1,0 +1,33 @@
+NEOSTATS Contract Forms Automation - Phase 2 Azure notes
+
+Recommended topology based on the inspected source:
+- Backend: Azure App Service (Linux, Node.js 22).
+- Frontend: Azure App Service (Linux, Node.js 22). The inspected Next.js app uses the Next server runtime; do not configure it as a static export without separately proving that all routes/features are static-compatible.
+- Database: Azure Database for PostgreSQL Flexible Server.
+- Secrets: Azure Key Vault, accessed by the backend App Service managed identity.
+- Monitoring: create/enable Application Insights for each App Service. Configure the connection string and enable the supported Node.js auto-instrumentation or add the Application Insights Node SDK; the connection string alone does not instrument application code.
+- Document bytes: retain the planned Google Drive provider in Phase 3. Do not create Attachment rows with fabricated driveFileId values. Azure Blob Storage is not required for Phase 2.
+
+Backend build/runtime:
+- Working directory: backend
+- Build: npm ci; npm run db:generate; npm run build
+- Start: npm start (node dist/server.js)
+- Apply migrations as a controlled release step: npm run db:deploy
+- Health probe: GET /api/health (liveness). GET /api/health/db checks PostgreSQL connectivity.
+- App Service must run Node.js 22. The settings script selects the Node 22 LTS stack. Configure the App Service startup command to `npm start` after deploying the compiled backend and production dependencies.
+
+Frontend build/runtime:
+- Working directory: frontend
+- Build: npm ci; npm run build
+- Start: npm run start
+- Set NEXT_PUBLIC_API_BASE_URL to the backend URL ending in /api BEFORE `npm run build`; Next.js embeds NEXT_PUBLIC values in the browser bundle.
+
+Important:
+- This package does not create Azure resources, deploy code, run migrations, or verify a live Azure environment.
+- Store DATABASE_URL and JWT_SECRET as Key Vault secrets. The backend script configures Key Vault references, not secret values.
+- Grant the backend managed identity the Key Vault Secrets User role on the vault.
+- Use a PostgreSQL connection string with TLS (`sslmode=require`) and a strong unique JWT secret.
+- Set FRONTEND_ORIGIN to the exact production frontend origin (scheme + host, no path). Multiple exact origins can be comma-separated if genuinely required.
+- Document upload limits are required by the existing module. Confirm business-approved values before production; example values are not policy approval.
+- Do not expose DATABASE_URL, JWT_SECRET, Google service-account JSON, or other credentials in source control or frontend NEXT_PUBLIC variables.
+- Azure App Service and PostgreSQL Flexible Server may incur charges. Check the selected subscription, region, SKU, backups, and student-credit eligibility before provisioning.

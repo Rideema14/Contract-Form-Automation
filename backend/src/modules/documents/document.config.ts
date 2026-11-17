@@ -106,3 +106,20 @@ export function loadDocumentUploadConfig(
     maxFileCount: Number(env[DOCUMENT_ENV_KEYS.maxFileCount]),
   });
 }
+
+let cachedConfig: DocumentUploadConfig | undefined;
+
+/**
+ * Loads the configuration once and caches it. Call this when the upload
+ * routes are connected (at startup) so a missing setting stops the server at
+ * boot instead of failing on the first upload. Throws DocumentConfigError.
+ */
+export function getDocumentUploadConfig(): DocumentUploadConfig {
+  cachedConfig ??= loadDocumentUploadConfig();
+  return cachedConfig;
+}
+
+/** Test helper: forget the cached configuration. */
+export function resetDocumentUploadConfigCache(): void {
+  cachedConfig = undefined;
+}
