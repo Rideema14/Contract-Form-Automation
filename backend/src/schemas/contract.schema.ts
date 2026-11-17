@@ -7,6 +7,7 @@ const optionalText = z.string().trim().max(10000).optional().nullable();
 export const contractIdSchema = z.object({ id: uuid }).strict();
 
 export const contractDraftSchema = z.object({
+  referenceNo: z.string().trim().max(255).optional().nullable(),
   title: z.string().trim().min(1).max(255).optional().nullable(),
   sponsorDepartmentId: uuid.optional().nullable(),
   contractCategoryId: uuid.optional().nullable(),
@@ -15,6 +16,7 @@ export const contractDraftSchema = z.object({
   contractAmount: decimal.optional().nullable(),
   currencyId: uuid.optional().nullable(),
   recommendedVendorId: uuid.optional().nullable(),
+  recommendedBidderId: uuid.optional().nullable(),
   selectionRationale: optionalText,
 }).strict();
 
@@ -34,7 +36,12 @@ export const contractListQuerySchema = z.object({
 });
 
 export const bidderSchema = z.object({
-  vendorId: uuid,
+  vendorId: uuid.optional().nullable(),
+  companyName: z.string().trim().min(1).max(255).optional(),
+  contactPerson: z.string().trim().max(255).optional().nullable(),
+  email: z.string().trim().email().max(255).optional().nullable(),
+  phone: z.string().trim().max(100).optional().nullable(),
+  qualifications: z.string().trim().max(10000).optional().nullable(),
   sortOrder: z.number().int().min(0),
 }).strict();
 
@@ -56,7 +63,7 @@ export const costLineSchema = z.object({
   description: z.string().trim().min(1).max(10000),
   quantity: decimal.optional().nullable(),
   unitCost: decimal.optional().nullable(),
-  amount: decimal,
+  amount: decimal.optional(),
   sortOrder: z.number().int().min(0),
 }).strict();
 
@@ -65,4 +72,23 @@ export const costLineParamsSchema = z.object({
   lineId: uuid,
 }).strict();
 
+export const evaluationSchema = z.object({
+  bidderId: uuid,
+  type: z.enum(['TECHNICAL', 'COMMERCIAL']),
+  score: decimal.optional().nullable(),
+  remarks: optionalText,
+}).strict();
+
+export const evaluationsSchema = z.object({
+  evaluations: z.array(evaluationSchema).min(1),
+}).strict();
+
+export const evaluationParamsSchema = z.object({
+  formId: uuid,
+  evaluationId: uuid,
+}).strict();
+
+export const submitSchema = z.object({}).strict();
+
 export type ContractDraftInput = z.infer<typeof contractDraftSchema>;
+export type EvaluationInput = z.infer<typeof evaluationSchema>;

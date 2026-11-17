@@ -119,6 +119,7 @@ model ContractForm {
   contractAmount       Decimal?           @db.Decimal(19, 4)
   currencyId           String?
   recommendedVendorId  String?
+  recommendedBidderId  String?
   selectionRationale   String?
   status               ContractStatus     @default(DRAFT)
   createdById          String
@@ -130,6 +131,7 @@ model ContractForm {
   contractCategory     ContractCategory?  @relation(fields: [contractCategoryId], references: [id], onDelete: Restrict)
   currency             Currency?          @relation(fields: [currencyId], references: [id], onDelete: Restrict)
   recommendedVendor    Vendor?            @relation("RecommendedVendor", fields: [recommendedVendorId], references: [id], onDelete: Restrict)
+  recommendedBidder    Bidder?            @relation("RecommendedBidder", fields: [recommendedBidderId, id], references: [id, contractFormId], onDelete: Restrict)
   bidders              Bidder[]
   evaluations          Evaluation[]
   costLines            CostLine[]
@@ -148,10 +150,16 @@ model ContractForm {
 model Bidder {
   id             String       @id @default(uuid())
   contractFormId String
-  vendorId       String
+  vendorId       String?
+  companyName    String
+  contactPerson  String?
+  email          String?
+  phone          String?
+  qualifications String?
   sortOrder      Int
   contractForm   ContractForm @relation(fields: [contractFormId], references: [id], onDelete: Restrict)
-  vendor         Vendor       @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  vendor         Vendor?      @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  recommendedBy  ContractForm[] @relation("RecommendedBidder")
   quotations     Quotation[]
   evaluations    Evaluation[]
 

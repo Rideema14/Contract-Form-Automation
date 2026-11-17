@@ -2,8 +2,9 @@ import { Router } from 'express';
 import authenticate from '../middleware/authenticate';
 import {
   createBidder, createContract, createCostLine, createQuotation,
-  deleteBidder, deleteCostLine, deleteQuotation, getContract,
-  listBidders, listContracts, listCostLines, listQuotations,
+  deleteBidder, deleteContract, deleteCostLine, deleteQuotation, getContract,
+  getCostEstimate, listBidders, listContracts, listCostLines, listDrafts, listEvaluations, listQuotations,
+  saveDraft, saveEvaluations, submitContract,
   updateBidder, updateContract, updateCostLine, updateQuotation,
 } from '../controllers/contracts.controller';
 
@@ -12,8 +13,12 @@ router.use(authenticate);
 
 router.post('/', createContract);
 router.get('/', listContracts);
+router.get('/drafts', listDrafts);
 router.get('/:id', getContract);
 router.patch('/:id', updateContract);
+router.post('/:id/save-draft', saveDraft);
+router.delete('/:id', deleteContract);
+router.post('/:id/submit', submitContract);
 
 router.get('/:formId/bidders', listBidders);
 router.post('/:formId/bidders', createBidder);
@@ -29,5 +34,8 @@ router.get('/:formId/cost-lines', listCostLines);
 router.post('/:formId/cost-lines', createCostLine);
 router.patch('/:formId/cost-lines/:lineId', updateCostLine);
 router.delete('/:formId/cost-lines/:lineId', deleteCostLine);
+router.get('/:formId/cost-estimate', getCostEstimate);
+router.get('/:formId/evaluations', listEvaluations);
+router.put('/:formId/evaluations', saveEvaluations);
 
 export default router;
