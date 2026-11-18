@@ -181,7 +181,7 @@ describe('createDocumentUploadMiddleware: rejected uploads', () => {
       .post('/upload')
       .attach('files', bytes(1025), { filename: 'big.pdf', contentType: PDF });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(413);
     expect(res.body.error.code).toBe('LIMIT_FILE_SIZE');
     expect(await leftovers()).toEqual([]);
   });

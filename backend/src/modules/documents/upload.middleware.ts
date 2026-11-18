@@ -28,12 +28,14 @@ const TEMP_UPLOAD_DIRECTORY = path.join(
   'document-uploads'
 );
 
-export function createDocumentUpload(config: DocumentUploadConfig) {
+export function createDocumentUpload(input: DocumentUploadConfig | { config: DocumentUploadConfig; tempDir?: string }) {
+  const config = 'config' in input ? input.config : input;
+  const tempDirectory = path.resolve(('config' in input && input.tempDir) || TEMP_UPLOAD_DIRECTORY);
   const storage = multer.diskStorage({
     destination: (_req, _file, callback) => {
-      fs.mkdir(TEMP_UPLOAD_DIRECTORY, { recursive: true })
-        .then(() => callback(null, TEMP_UPLOAD_DIRECTORY))
-        .catch((error: Error) => callback(error, TEMP_UPLOAD_DIRECTORY));
+      fs.mkdir(tempDirectory, { recursive: true })
+        .then(() => callback(null, tempDirectory))
+        .catch((error: Error) => callback(error, tempDirectory));
     },
 
     filename: (_req, file, callback) => {
@@ -110,7 +112,7 @@ export function validateUploadedDocument(
 export async function cleanupTemporaryUpload(
   file: Express.Multer.File
 ): Promise<void> {
-  const directory = path.resolve(TEMP_UPLOAD_DIRECTORY);
+  const directory = path.resolve(file.destination || TEMP_UPLOAD_DIRECTORY);
   const filePath = path.resolve(file.path);
 
   if (path.dirname(filePath) !== directory) {
@@ -153,7 +155,7 @@ export function getDocumentUploadError(error: unknown): {
     };
 
     return {
-      statusCode: 400,
+      statusCode: error.code === 'LIMIT_FILE_SIZE' ? 413 : 400,
       code: error.code,
       message: messages[error.code] ?? 'Document upload failed.',
     };

@@ -1,3 +1,4 @@
+
 import type {
   ApiErrorResponse,
   ApiSuccessResponse,
@@ -10,11 +11,13 @@ export class ApiError extends Error {
   readonly status: number;
   readonly code?: string;
   readonly details: unknown[];
+  statusCode: number;
 
   constructor(response: ApiErrorResponse, status: number) {
     super(response.message);
     this.name = "ApiError";
     this.status = status;
+    this.statusCode = status;
     this.code = response.error?.code;
     this.details = response.error?.details ?? [];
   }
@@ -75,6 +78,7 @@ async function requestPayload(
   options: RequestOptions,
 ): Promise<unknown> {
   const headers = new Headers(options.headers);
+
   if (options.body !== undefined && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
@@ -98,8 +102,12 @@ async function requestPayload(
       : {
           success: false,
           message: `API request failed: ${response.status}`,
-          error: { code: "HTTP_ERROR", details: [] },
+          error: {
+            code: "HTTP_ERROR",
+            details: [],
+          },
         };
+
     throw new ApiError(errorResponse, response.status);
   }
 

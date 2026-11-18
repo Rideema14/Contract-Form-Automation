@@ -1,4 +1,4 @@
-﻿import { ContractStatus, Prisma, UserRole } from '@prisma/client';
+import { ContractStatus, Prisma, UserRole } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AppError } from '../utils/app-error';
 import { ContractDraftInput } from '../schemas/contract.schema';
@@ -64,6 +64,11 @@ export async function assertCanUploadAttachments(
   user: AuthUser,
 ): Promise<void> {
   await getEditableForm(formId, user);
+}
+
+/** Verify visibility for attachment listing and download operations. */
+export async function assertCanViewAttachments(formId: string, user: AuthUser): Promise<void> {
+  await getAccessibleForm(formId, user);
 }
 async function getAccessibleForm(formId: string, user: AuthUser) {
   assertAuthenticated(user);

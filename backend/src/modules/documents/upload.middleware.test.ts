@@ -76,7 +76,7 @@ describe('Document upload middleware', () => {
       const error = new MulterError('LIMIT_FILE_SIZE');
 
       expect(getDocumentUploadError(error)).toEqual({
-        statusCode: 400,
+        statusCode: 413,
         code: 'LIMIT_FILE_SIZE',
         message: 'The uploaded file exceeds the configured size limit.',
       });

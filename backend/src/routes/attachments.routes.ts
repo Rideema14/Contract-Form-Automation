@@ -1,4 +1,4 @@
-﻿import { Router, RequestHandler } from 'express';
+import { Router, RequestHandler } from 'express';
 
 import authenticate from '../middleware/authenticate';
 import {
@@ -10,6 +10,13 @@ import {
   loadDocumentUploadConfig,
 } from '../modules/documents/document.config';
 import { AppError } from '../utils/app-error';
+import { createAttachmentsRouter } from '../modules/documents/attachments.router';
+import {
+  assertCanViewAttachments,
+  documentService,
+  generateAndStoreFinalPdf,
+} from '../modules/documents/documents.runtime';
+import * as contractService from '../services/contract.service';
 import {
   authorizeAttachmentUpload,
   validateAttachments,
@@ -46,6 +53,17 @@ router.post(
   authorizeAttachmentUpload,
   configuredDocumentUpload,
   validateAttachments,
+);
+
+router.use(
+  createAttachmentsRouter({
+    service: documentService,
+    authenticate,
+    assertCanUpload: (formId, user) => contractService.assertCanUploadAttachments(formId, user as never),
+    assertCanView: assertCanViewAttachments,
+    upload: configuredDocumentUpload,
+    ensureFinalPdf: (formId, user) => generateAndStoreFinalPdf(formId, user),
+  }),
 );
 
 // Upload errors use the same response envelope as the rest of the API.
