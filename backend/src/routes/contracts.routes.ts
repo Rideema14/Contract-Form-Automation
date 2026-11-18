@@ -4,7 +4,7 @@ import {
   createBidder, createContract, createCostLine, createQuotation,
   deleteBidder, deleteCostLine, deleteQuotation, getContract,
   listBidders, listContracts, listCostLines, listQuotations,
-  updateBidder, updateContract, updateCostLine, updateQuotation,
+  updateBidder, updateContract, updateCostLine, updateQuotation, submitContract,
 } from '../controllers/contracts.controller';
 
 const router = Router();
@@ -13,7 +13,8 @@ router.use(authenticate);
 router.post('/', createContract);
 router.get('/', listContracts);
 router.get('/:id', getContract);
-router.patch('/:id', updateContract);
+router.post('/:id/submit', submitContract);
+
 
 router.get('/:formId/bidders', listBidders);
 router.post('/:formId/bidders', createBidder);

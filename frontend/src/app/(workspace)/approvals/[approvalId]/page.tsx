@@ -55,7 +55,7 @@ export default function ApprovalDetailPage() {
         setLoading(false);
       }
     })();
-  }, [params.approvalId]);
+  }, [params.approvalId, router]);
 
   const handleAction = async (comment?: string) => {
     if (!stepDetail) return;

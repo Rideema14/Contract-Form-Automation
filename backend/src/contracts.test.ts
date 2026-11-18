@@ -1,3 +1,4 @@
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ContractStatus, UserRole } from '@prisma/client';
 import { prisma } from './lib/prisma';
@@ -14,7 +15,13 @@ import {
   updateBidder,
   updateQuotation,
   updateContract,
+  submitContract,
 } from './services/contract.service';
+import { initializeOrResetApprovalWorkflow } from './services/approval.service';
+
+vi.mock('./services/approval.service', () => ({
+  initializeOrResetApprovalWorkflow: vi.fn(),
+}));
 
 const submitter = { id: 'user-1', role: UserRole.SUBMITTER };
 const admin = { id: 'admin-1', role: UserRole.ADMIN };
@@ -26,7 +33,11 @@ afterEach(() => {
 
 describe('contract request validation', () => {
   it('accepts a partial draft with Decimal money as a string', () => {
-    const result = contractDraftSchema.safeParse({ title: 'Draft', contractAmount: '12500.2500' });
+    const result = contractDraftSchema.safeParse({
+      title: 'Draft',
+      contractAmount: '12500.2500',
+    });
+
     expect(result.success).toBe(true);
   });
 
@@ -36,8 +47,17 @@ describe('contract request validation', () => {
   });
 
   it('applies list defaults and rejects invalid bidder ordering', () => {
-    expect(contractListQuerySchema.parse({})).toMatchObject({ page: 1, pageSize: 20 });
-    expect(bidderSchema.safeParse({ vendorId: 'not-a-uuid', sortOrder: -1 }).success).toBe(false);
+    expect(contractListQuerySchema.parse({})).toMatchObject({
+      page: 1,
+      pageSize: 20,
+    });
+
+    expect(
+      bidderSchema.safeParse({
+        vendorId: 'not-a-uuid',
+        sortOrder: -1,
+      }).success,
+    ).toBe(false);
   });
 });
 
@@ -49,20 +69,27 @@ describe('contract service authorization and persistence', () => {
       createdById: submitter.id,
     } as never);
 
-    await createDraft(submitter, { title: 'Draft', contractAmount: '10.25' });
+    await createDraft(submitter, {
+      title: 'Draft',
+      contractAmount: '10.25',
+    });
 
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        createdById: submitter.id,
-        status: ContractStatus.DRAFT,
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          createdById: submitter.id,
+          status: ContractStatus.DRAFT,
+        }),
       }),
-    }));
+    );
+
     create.mockRestore();
   });
 
   it('lists only the submitter-owned records', async () => {
     const findMany = vi.spyOn(prisma.contractForm, 'findMany').mockResolvedValue([] as never);
     const count = vi.spyOn(prisma.contractForm, 'count').mockResolvedValue(0);
+
     const transaction = vi.spyOn(prisma, '$transaction').mockResolvedValue([
       [{ id: 'form-1' }],
       1,
@@ -72,30 +99,48 @@ describe('contract service authorization and persistence', () => {
 
     expect(transaction).toHaveBeenCalled();
     expect(transaction.mock.calls[0][0]).toBeInstanceOf(Array);
-    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { createdById: submitter.id } }));
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { createdById: submitter.id },
+      }),
+    );
+
     expect(count).toHaveBeenCalled();
   });
 
   it('lists assigned contracts for approvers', async () => {
     const findMany = vi.spyOn(prisma.contractForm, 'findMany').mockResolvedValue([] as never);
+
     vi.spyOn(prisma.contractForm, 'count').mockResolvedValue(0);
     vi.spyOn(prisma, '$transaction').mockResolvedValue([[], 0] as never);
 
     await listContracts(approver, { page: 1, pageSize: 20 });
 
-    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { approvalSteps: { some: { approverId: approver.id } } },
-    }));
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          approvalSteps: {
+            some: { approverId: approver.id },
+          },
+        },
+      }),
+    );
   });
 
   it('lists all contracts for administrators', async () => {
     const findMany = vi.spyOn(prisma.contractForm, 'findMany').mockResolvedValue([] as never);
+
     vi.spyOn(prisma.contractForm, 'count').mockResolvedValue(0);
     vi.spyOn(prisma, '$transaction').mockResolvedValue([[], 0] as never);
 
     await listContracts(admin, { page: 1, pageSize: 20 });
 
-    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ where: {} }));
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {},
+      }),
+    );
   });
 
   it('denies a submitter access to another user contract', async () => {
@@ -104,93 +149,126 @@ describe('contract service authorization and persistence', () => {
       createdById: 'other-user',
       status: ContractStatus.DRAFT,
     } as never);
+
     const approvalLookup = vi.spyOn(prisma.approvalStep, 'findFirst').mockResolvedValue(null);
 
     await expect(getContract('form-1', submitter)).rejects.toMatchObject({
       statusCode: 403,
       code: 'FORBIDDEN',
     });
+
     approvalLookup.mockRestore();
     findUnique.mockRestore();
   });
 
   it('allows an assigned approver to view a contract', async () => {
-      const findUnique = vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
-        id: 'form-1',
-        createdById: 'other-user',
-        status: ContractStatus.PENDING_APPROVAL,
-      } as never);
-      const approvalLookup = vi.spyOn(prisma.approvalStep, 'findFirst').mockResolvedValue({
-        id: 'step-1',
-        contractFormId: 'form-1',
-        approverId: approver.id,
-      } as never);
-      const detail = vi.spyOn(prisma.contractForm, 'findUniqueOrThrow').mockResolvedValue({ id: 'form-1' } as never);
+    const findUnique = vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: 'other-user',
+      status: ContractStatus.PENDING_APPROVAL,
+    } as never);
 
-      await expect(getContract('form-1', approver)).resolves.toEqual({ id: 'form-1' });
-      detail.mockRestore();
-      approvalLookup.mockRestore();
-      findUnique.mockRestore();
+    const approvalLookup = vi.spyOn(prisma.approvalStep, 'findFirst').mockResolvedValue({
+      id: 'step-1',
+      contractFormId: 'form-1',
+      approverId: approver.id,
+    } as never);
+
+    const detail = vi.spyOn(prisma.contractForm, 'findUniqueOrThrow').mockResolvedValue({
+      id: 'form-1',
+    } as never);
+
+    await expect(getContract('form-1', approver)).resolves.toEqual({
+      id: 'form-1',
+    });
+
+    detail.mockRestore();
+    approvalLookup.mockRestore();
+    findUnique.mockRestore();
   });
 
   it('denies a submitter assigned to an approval step', async () => {
-      const findUnique = vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
-        id: 'form-1',
-        createdById: 'other-user',
-        status: ContractStatus.PENDING_APPROVAL,
-      } as never);
-      const approvalLookup = vi.spyOn(prisma.approvalStep, 'findFirst').mockResolvedValue({
-        id: 'step-1',
-        contractFormId: 'form-1',
-        approverId: submitter.id,
-      } as never);
+    const findUnique = vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: 'other-user',
+      status: ContractStatus.PENDING_APPROVAL,
+    } as never);
 
-      await expect(getContract('form-1', submitter)).rejects.toMatchObject({ statusCode: 403, code: 'FORBIDDEN' });
-      approvalLookup.mockRestore();
-      findUnique.mockRestore();
+    const approvalLookup = vi.spyOn(prisma.approvalStep, 'findFirst').mockResolvedValue({
+      id: 'step-1',
+      contractFormId: 'form-1',
+      approverId: submitter.id,
+    } as never);
+
+    await expect(getContract('form-1', submitter)).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'FORBIDDEN',
+    });
+
+    approvalLookup.mockRestore();
+    findUnique.mockRestore();
   });
 
   it("denies an unassigned approver access to another user's contract", async () => {
-      const findUnique = vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
-        id: 'form-1',
-        createdById: 'other-user',
-        status: ContractStatus.PENDING_APPROVAL,
-      } as never);
-      const approvalLookup = vi.spyOn(prisma.approvalStep, 'findFirst').mockResolvedValue(null);
+    const findUnique = vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: 'other-user',
+      status: ContractStatus.PENDING_APPROVAL,
+    } as never);
 
-      await expect(getContract('form-1', approver)).rejects.toMatchObject({ statusCode: 403, code: 'FORBIDDEN' });
-      approvalLookup.mockRestore();
-      findUnique.mockRestore();
+    const approvalLookup = vi.spyOn(prisma.approvalStep, 'findFirst').mockResolvedValue(null);
+
+    await expect(getContract('form-1', approver)).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'FORBIDDEN',
+    });
+
+    approvalLookup.mockRestore();
+    findUnique.mockRestore();
   });
 
   it('allows the contract owner to view their own contract', async () => {
-      const findUnique = vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
-        id: 'form-1',
-        createdById: submitter.id,
-        status: ContractStatus.DRAFT,
-      } as never);
-      const detail = vi.spyOn(prisma.contractForm, 'findUniqueOrThrow').mockResolvedValue({ id: 'form-1' } as never);
+    const findUnique = vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: submitter.id,
+      status: ContractStatus.DRAFT,
+    } as never);
 
-      await expect(getContract('form-1', submitter)).resolves.toEqual({ id: 'form-1' });
-      detail.mockRestore();
-      findUnique.mockRestore();
+    const detail = vi.spyOn(prisma.contractForm, 'findUniqueOrThrow').mockResolvedValue({
+      id: 'form-1',
+    } as never);
+
+    await expect(getContract('form-1', submitter)).resolves.toEqual({
+      id: 'form-1',
+    });
+
+    detail.mockRestore();
+    findUnique.mockRestore();
   });
 
   it('allows an administrator to access another user contract', async () => {
     const findUnique = vi.spyOn(prisma.contractForm, 'findUnique');
-    findUnique.mockResolvedValueOnce({
-      id: 'form-1',
-      createdById: 'other-user',
-      status: ContractStatus.DRAFT,
-    } as never);
-    findUnique.mockResolvedValueOnce({
-      id: 'form-1',
-      createdById: 'other-user',
-      status: ContractStatus.DRAFT,
-    } as never);
-    const detail = vi.spyOn(prisma.contractForm, 'findUniqueOrThrow').mockResolvedValue({ id: 'form-1' } as never);
 
-    await expect(getContract('form-1', admin)).resolves.toEqual({ id: 'form-1' });
+    findUnique.mockResolvedValueOnce({
+      id: 'form-1',
+      createdById: 'other-user',
+      status: ContractStatus.DRAFT,
+    } as never);
+
+    findUnique.mockResolvedValueOnce({
+      id: 'form-1',
+      createdById: 'other-user',
+      status: ContractStatus.DRAFT,
+    } as never);
+
+    const detail = vi.spyOn(prisma.contractForm, 'findUniqueOrThrow').mockResolvedValue({
+      id: 'form-1',
+    } as never);
+
+    await expect(getContract('form-1', admin)).resolves.toEqual({
+      id: 'form-1',
+    });
+
     detail.mockRestore();
     findUnique.mockRestore();
   });
@@ -201,11 +279,18 @@ describe('contract service authorization and persistence', () => {
       createdById: submitter.id,
       status: ContractStatus.DRAFT,
     } as never);
+
     const bidderLookup = vi.spyOn(prisma.bidder, 'findFirst').mockResolvedValue(null);
 
-    await expect(updateContract('form-1', submitter, {
-      recommendedVendorId: '00000000-0000-0000-0000-000000000001',
-    })).rejects.toMatchObject({ statusCode: 409, code: 'INVALID_RECOMMENDED_VENDOR' });
+    await expect(
+      updateContract('form-1', submitter, {
+        recommendedVendorId: '00000000-0000-0000-0000-000000000001',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'INVALID_RECOMMENDED_VENDOR',
+    });
+
     bidderLookup.mockRestore();
     formLookup.mockRestore();
   });
@@ -216,17 +301,25 @@ describe('contract service authorization and persistence', () => {
       createdById: submitter.id,
       status: ContractStatus.DRAFT,
     } as never);
+
     const bidderLookup = vi.spyOn(prisma.bidder, 'findFirst').mockResolvedValue({
       id: 'bidder-1',
       contractFormId: 'form-1',
       vendorId: '00000000-0000-0000-0000-000000000001',
     } as never);
-    const update = vi.spyOn(prisma.contractForm, 'update').mockResolvedValue({ id: 'form-1' } as never);
 
-    await expect(updateContract('form-1', submitter, {
-      recommendedVendorId: '00000000-0000-0000-0000-000000000001',
-    })).resolves.toEqual({ id: 'form-1' });
+    const update = vi.spyOn(prisma.contractForm, 'update').mockResolvedValue({
+      id: 'form-1',
+    } as never);
+
+    await expect(
+      updateContract('form-1', submitter, {
+        recommendedVendorId: '00000000-0000-0000-0000-000000000001',
+      }),
+    ).resolves.toEqual({ id: 'form-1' });
+
     expect(update).toHaveBeenCalled();
+
     update.mockRestore();
     bidderLookup.mockRestore();
     formLookup.mockRestore();
@@ -239,15 +332,18 @@ describe('contract service authorization and persistence', () => {
       recommendedVendorId: 'vendor-1',
       status: ContractStatus.DRAFT,
     } as never);
+
     vi.spyOn(prisma.bidder, 'findFirst').mockResolvedValue({
       id: 'bidder-1',
       contractFormId: 'form-1',
       vendorId: 'vendor-1',
     } as never);
 
-    await expect(updateBidder('form-1', 'bidder-1', submitter, {
-      vendorId: 'vendor-2',
-    })).rejects.toMatchObject({
+    await expect(
+      updateBidder('form-1', 'bidder-1', submitter, {
+        vendorId: 'vendor-2',
+      }),
+    ).rejects.toMatchObject({
       statusCode: 409,
       code: 'RECOMMENDED_VENDOR_BIDDER_CONFLICT',
     });
@@ -260,13 +356,16 @@ describe('contract service authorization and persistence', () => {
       recommendedVendorId: 'vendor-1',
       status: ContractStatus.DRAFT,
     } as never);
+
     vi.spyOn(prisma.bidder, 'findFirst').mockResolvedValue({
       id: 'bidder-1',
       contractFormId: 'form-1',
       vendorId: 'vendor-1',
     } as never);
 
-    await expect(deleteBidder('form-1', 'bidder-1', submitter)).rejects.toMatchObject({
+    await expect(
+      deleteBidder('form-1', 'bidder-1', submitter),
+    ).rejects.toMatchObject({
       statusCode: 409,
       code: 'RECOMMENDED_VENDOR_BIDDER_CONFLICT',
     });
@@ -279,14 +378,20 @@ describe('contract service authorization and persistence', () => {
       recommendedVendorId: null,
       status: ContractStatus.DRAFT,
     } as never);
+
     vi.spyOn(prisma.bidder, 'findFirst').mockResolvedValue({
       id: 'bidder-1',
       contractFormId: 'form-1',
       vendorId: 'vendor-1',
     } as never);
-    vi.spyOn(prisma.evaluation, 'findFirst').mockResolvedValue({ id: 'evaluation-1' } as never);
 
-    await expect(deleteBidder('form-1', 'bidder-1', submitter)).rejects.toMatchObject({
+    vi.spyOn(prisma.evaluation, 'findFirst').mockResolvedValue({
+      id: 'evaluation-1',
+    } as never);
+
+    await expect(
+      deleteBidder('form-1', 'bidder-1', submitter),
+    ).rejects.toMatchObject({
       statusCode: 409,
       code: 'BIDDER_HAS_EVALUATIONS',
     });
@@ -299,24 +404,36 @@ describe('contract service authorization and persistence', () => {
       recommendedVendorId: null,
       status: ContractStatus.DRAFT,
     } as never);
+
     vi.spyOn(prisma.bidder, 'findFirst').mockResolvedValue({
       id: 'bidder-1',
       contractFormId: 'form-1',
       vendorId: 'vendor-1',
     } as never);
+
     vi.spyOn(prisma.evaluation, 'findFirst').mockResolvedValue(null);
+
     const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
     const deleteBidderRecord = vi.fn().mockResolvedValue({ id: 'bidder-1' });
-    const transaction = vi.spyOn(prisma, '$transaction').mockImplementation(async (callback) => callback({
-      quotation: { deleteMany },
-      bidder: { delete: deleteBidderRecord },
-    } as never) as never);
+
+    const transaction = vi.spyOn(prisma, '$transaction').mockImplementation(
+      async (callback) =>
+        callback({
+          quotation: { deleteMany },
+          bidder: { delete: deleteBidderRecord },
+        } as never) as never,
+    );
 
     await deleteBidder('form-1', 'bidder-1', submitter);
 
     expect(transaction).toHaveBeenCalled();
-    expect(deleteMany).toHaveBeenCalledWith({ where: { bidderId: 'bidder-1' } });
-    expect(deleteBidderRecord).toHaveBeenCalledWith({ where: { id: 'bidder-1' } });
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: { bidderId: 'bidder-1' },
+    });
+
+    expect(deleteBidderRecord).toHaveBeenCalledWith({
+      where: { id: 'bidder-1' },
+    });
   });
 
   it('rejects an unknown currency when updating a quotation', async () => {
@@ -325,12 +442,18 @@ describe('contract service authorization and persistence', () => {
       createdById: submitter.id,
       status: ContractStatus.DRAFT,
     } as never);
-    vi.spyOn(prisma.quotation, 'findFirst').mockResolvedValue({ id: 'quotation-1' } as never);
+
+    vi.spyOn(prisma.quotation, 'findFirst').mockResolvedValue({
+      id: 'quotation-1',
+    } as never);
+
     vi.spyOn(prisma.currency, 'findUnique').mockResolvedValue(null);
 
-    await expect(updateQuotation('form-1', 'bidder-1', 'quotation-1', submitter, {
-      currencyId: 'currency-1',
-    })).rejects.toMatchObject({
+    await expect(
+      updateQuotation('form-1', 'bidder-1', 'quotation-1', submitter, {
+        currencyId: 'currency-1',
+      }),
+    ).rejects.toMatchObject({
       statusCode: 404,
       code: 'CURRENCY_NOT_FOUND',
     });
@@ -342,16 +465,168 @@ describe('contract service authorization and persistence', () => {
       createdById: submitter.id,
       status: ContractStatus.DRAFT,
     } as never);
-    vi.spyOn(prisma.quotation, 'findFirst').mockResolvedValue({ id: 'quotation-1' } as never);
-    const update = vi.spyOn(prisma.quotation, 'update').mockResolvedValue({ id: 'quotation-1' } as never);
-    vi.spyOn(prisma, '$transaction').mockImplementation(async (callback) => callback({
-      quotation: { update },
-    } as never) as never);
 
-    await updateQuotation('form-1', 'bidder-1', 'quotation-1', submitter, { currencyId: null });
+    vi.spyOn(prisma.quotation, 'findFirst').mockResolvedValue({
+      id: 'quotation-1',
+    } as never);
 
-    expect(update).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ currencyId: null }),
-    }));
+    const update = vi.spyOn(prisma.quotation, 'update').mockResolvedValue({
+      id: 'quotation-1',
+    } as never);
+
+    vi.spyOn(prisma, '$transaction').mockImplementation(
+      async (callback) =>
+        callback({
+          quotation: { update },
+        } as never) as never,
+    );
+
+    await updateQuotation('form-1', 'bidder-1', 'quotation-1', submitter, {
+      currencyId: null,
+    });
+
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          currencyId: null,
+        }),
+      }),
+    );
+  });
+});
+
+// ---- Submission tests ----
+
+describe('contract submission', () => {
+  // Valid UUIDs are required by initializeWorkflowSchema.
+  const formId = '550e8400-e29b-41d4-a716-446655440001';
+  const approverId = '550e8400-e29b-41d4-a716-446655440002';
+
+  it('submits a draft contract successfully', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: formId,
+      createdById: submitter.id,
+      status: ContractStatus.DRAFT,
+    } as any);
+
+    const txMock = {
+      contractForm: {
+        update: vi.fn().mockResolvedValue(undefined),
+        findUnique: vi.fn().mockResolvedValue({
+          id: formId,
+          status: ContractStatus.PENDING_APPROVAL,
+        }),
+      },
+      auditLog: {
+        create: vi.fn().mockResolvedValue(undefined),
+      },
+    } as any;
+
+    vi.spyOn(prisma, '$transaction').mockImplementation(async (cb: any) => cb(txMock));
+
+    const result = await submitContract(formId, submitter, [approverId]);
+
+    expect(result).toEqual({
+      id: formId,
+      status: ContractStatus.PENDING_APPROVAL,
+    });
+
+    expect(initializeOrResetApprovalWorkflow).toHaveBeenCalledWith(
+      formId,
+      [approverId],
+      submitter.id,
+      txMock,
+    );
+  });
+
+  it('resubmits a returned contract successfully', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: formId,
+      createdById: submitter.id,
+      status: ContractStatus.RETURNED,
+    } as any);
+
+    const txMock = {
+      contractForm: {
+        update: vi.fn().mockResolvedValue(undefined),
+        findUnique: vi.fn().mockResolvedValue({
+          id: formId,
+          status: ContractStatus.PENDING_APPROVAL,
+        }),
+      },
+      auditLog: {
+        create: vi.fn().mockResolvedValue(undefined),
+      },
+    } as any;
+
+    vi.spyOn(prisma, '$transaction').mockImplementation(async (cb: any) => cb(txMock));
+
+    const result = await submitContract(formId, submitter, [approverId]);
+
+    expect(result).toEqual({
+      id: formId,
+      status: ContractStatus.PENDING_APPROVAL,
+    });
+  });
+
+  it('rejects submission by non-creator', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: formId,
+      createdById: 'other-user',
+      status: ContractStatus.DRAFT,
+    } as any);
+
+    await expect(
+      submitContract(formId, submitter, [approverId]),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'FORBIDDEN',
+    });
+  });
+
+  it('fails validation of approverIds', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: formId,
+      createdById: submitter.id,
+      status: ContractStatus.DRAFT,
+    } as any);
+
+    await expect(
+      submitContract(formId, submitter, ['not-a-uuid']),
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      code: 'VALIDATION_ERROR',
+    });
+  });
+
+  it('rejects submission when contract not in allowed status', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: formId,
+      createdById: submitter.id,
+      status: ContractStatus.PENDING_APPROVAL,
+    } as any);
+
+    await expect(
+      submitContract(formId, submitter, [approverId]),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'INVALID_STATE',
+    });
+  });
+
+  it('rolls back transaction on error', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: formId,
+      createdById: submitter.id,
+      status: ContractStatus.DRAFT,
+    } as any);
+
+    vi.spyOn(prisma, '$transaction').mockImplementation(async () => {
+      throw new Error('boom');
+    });
+
+    await expect(
+      submitContract(formId, submitter, [approverId]),
+    ).rejects.toThrow('boom');
   });
 });
