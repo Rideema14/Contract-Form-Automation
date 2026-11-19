@@ -242,8 +242,6 @@ export async function getApprovalHistory(contractFormId: string, user: AuthUser)
 
 /**
  * Concurrency-safe atomic approval action.
- * Strict assignment check: Only the approver assigned to the currently pending step can approve.
- * Advances to the next sequential active step or marks the contract as APPROVED if this was the final step.
  */
 export async function approveStep(
   stepId: string,
@@ -253,7 +251,6 @@ export async function approveStep(
   assertAuthenticated(user);
 
   return prisma.$transaction(async (tx) => {
-    // 1. Initial existence and authorization check
     const step = await tx.approvalStep.findUnique({
       where: { id: stepId },
       include: {
@@ -273,7 +270,6 @@ export async function approveStep(
       throw new AppError(404, 'APPROVAL_NOT_FOUND', 'Approval step not found');
     }
 
-    // Strict rule: Only the assigned approver can approve (no Admin bypass)
     if (step.approverId !== user.id) {
       throw new AppError(403, 'NOT_ASSIGNED_APPROVER', 'You are not the assigned approver for this step');
     }
@@ -284,9 +280,6 @@ export async function approveStep(
 
     const now = new Date();
 
-    // 2. ATOMIC CONDITIONAL UPDATE:
-    // Guards against race conditions and concurrent requests.
-    // If a simultaneous request already acted on this step, updateMany returns count === 0.
     const updateResult = await tx.approvalStep.updateMany({
       where: {
         id: stepId,
@@ -307,7 +300,6 @@ export async function approveStep(
       throw new AppError(409, 'STEP_NOT_PENDING', 'Approval step was already decided or is no longer pending');
     }
 
-    // 3. Create append-only ApprovalDecision record
     const decision = await tx.approvalDecision.create({
       data: {
         approvalStepId: step.id,
@@ -319,9 +311,6 @@ export async function approveStep(
       },
     });
 
-    // 4. Sequential Workflow Progression: Find next level in the ACTIVE workflow chain.
-    // Active waiting steps must have status: WAITING and actedAt: null.
-    // Surplus steps from past cycles do not match this criteria.
     const nextStep = await tx.approvalStep.findFirst({
       where: {
         contractFormId: step.contractFormId,
@@ -335,7 +324,6 @@ export async function approveStep(
     let finalContractStatus: ContractStatus = ContractStatus.PENDING_APPROVAL;
 
     if (nextStep) {
-      // Intermediate step: Activate next level
       await tx.approvalStep.update({
         where: { id: nextStep.id },
         data: { status: ApprovalStatus.PENDING },
@@ -347,8 +335,8 @@ export async function approveStep(
         status: ApprovalStatus.PENDING,
       };
 
-      // Notify next assigned approver
       const formIdentifier = step.contractForm.referenceNo || step.contractForm.title || 'Contract form';
+
       await tx.notification.create({
         data: {
           recipientId: nextStep.approverId,
@@ -357,7 +345,6 @@ export async function approveStep(
         },
       });
 
-      // Audit log entry for step progression
       await tx.auditLog.create({
         data: {
           actorId: user.id,
@@ -376,15 +363,15 @@ export async function approveStep(
         },
       });
     } else {
-      // Final step of the active chain: Mark contract as APPROVED
       finalContractStatus = ContractStatus.APPROVED;
+
       await tx.contractForm.update({
         where: { id: step.contractFormId },
         data: { status: ContractStatus.APPROVED },
       });
 
-      // Notify contract creator of final approval
       const formIdentifier = step.contractForm.referenceNo || step.contractForm.title || 'Your contract form';
+
       await tx.notification.create({
         data: {
           recipientId: step.contractForm.createdById,
@@ -393,7 +380,6 @@ export async function approveStep(
         },
       });
 
-      // Audit log entry for final contract approval
       await tx.auditLog.create({
         data: {
           actorId: user.id,
@@ -425,8 +411,7 @@ export async function approveStep(
 
 /**
  * Concurrency-safe atomic return action.
- * Strict assignment check: Only the approver assigned to the currently pending step can return.
- * Requires a mandatory comment. Changes step and contract form to RETURNED status.
+ * Requires a mandatory comment.
  */
 export async function returnStep(
   stepId: string,
@@ -436,6 +421,7 @@ export async function returnStep(
   assertAuthenticated(user);
 
   const comment = input.comment?.trim();
+
   if (!comment) {
     throw new AppError(400, 'VALIDATION_ERROR', 'Comment is required when returning a contract', [
       { path: ['comment'], message: 'Comment is required when returning a contract' },
@@ -462,7 +448,6 @@ export async function returnStep(
       throw new AppError(404, 'APPROVAL_NOT_FOUND', 'Approval step not found');
     }
 
-    // Strict rule: Only the assigned approver can return (no Admin bypass)
     if (step.approverId !== user.id) {
       throw new AppError(403, 'NOT_ASSIGNED_APPROVER', 'You are not the assigned approver for this step');
     }
@@ -473,7 +458,6 @@ export async function returnStep(
 
     const now = new Date();
 
-    // Atomic conditional update
     const updateResult = await tx.approvalStep.updateMany({
       where: {
         id: stepId,
@@ -494,7 +478,6 @@ export async function returnStep(
       throw new AppError(409, 'STEP_NOT_PENDING', 'Approval step was already decided or is no longer pending');
     }
 
-    // Append-only decision record
     const decision = await tx.approvalDecision.create({
       data: {
         approvalStepId: step.id,
@@ -506,14 +489,13 @@ export async function returnStep(
       },
     });
 
-    // Update contract status to RETURNED
     await tx.contractForm.update({
       where: { id: step.contractFormId },
       data: { status: ContractStatus.RETURNED },
     });
 
-    // Notify contract creator with approver's remarks
     const formIdentifier = step.contractForm.referenceNo || step.contractForm.title || 'Your contract form';
+
     await tx.notification.create({
       data: {
         recipientId: step.contractForm.createdById,
@@ -522,7 +504,6 @@ export async function returnStep(
       },
     });
 
-    // Audit log entry
     await tx.auditLog.create({
       data: {
         actorId: user.id,
@@ -552,8 +533,7 @@ export async function returnStep(
 
 /**
  * Concurrency-safe atomic reject action.
- * Strict assignment check: Only the approver assigned to the currently pending step can reject.
- * Requires a mandatory comment. Terminates the workflow by marking the contract and step as REJECTED.
+ * Requires a mandatory comment.
  */
 export async function rejectStep(
   stepId: string,
@@ -563,6 +543,7 @@ export async function rejectStep(
   assertAuthenticated(user);
 
   const comment = input.comment?.trim();
+
   if (!comment) {
     throw new AppError(400, 'VALIDATION_ERROR', 'Comment is required when rejecting a contract', [
       { path: ['comment'], message: 'Comment is required when rejecting a contract' },
@@ -589,7 +570,6 @@ export async function rejectStep(
       throw new AppError(404, 'APPROVAL_NOT_FOUND', 'Approval step not found');
     }
 
-    // Strict rule: Only the assigned approver can reject (no Admin bypass)
     if (step.approverId !== user.id) {
       throw new AppError(403, 'NOT_ASSIGNED_APPROVER', 'You are not the assigned approver for this step');
     }
@@ -600,7 +580,6 @@ export async function rejectStep(
 
     const now = new Date();
 
-    // Atomic conditional update
     const updateResult = await tx.approvalStep.updateMany({
       where: {
         id: stepId,
@@ -621,7 +600,6 @@ export async function rejectStep(
       throw new AppError(409, 'STEP_NOT_PENDING', 'Approval step was already decided or is no longer pending');
     }
 
-    // Cancel any remaining subsequent waiting steps in the active chain
     await tx.approvalStep.updateMany({
       where: {
         contractFormId: step.contractFormId,
@@ -634,7 +612,6 @@ export async function rejectStep(
       },
     });
 
-    // Append-only decision record
     const decision = await tx.approvalDecision.create({
       data: {
         approvalStepId: step.id,
@@ -646,14 +623,13 @@ export async function rejectStep(
       },
     });
 
-    // Update contract status to REJECTED (terminal state)
     await tx.contractForm.update({
       where: { id: step.contractFormId },
       data: { status: ContractStatus.REJECTED },
     });
 
-    // Notify contract creator of rejection
     const formIdentifier = step.contractForm.referenceNo || step.contractForm.title || 'Your contract form';
+
     await tx.notification.create({
       data: {
         recipientId: step.contractForm.createdById,
@@ -662,7 +638,6 @@ export async function rejectStep(
       },
     });
 
-    // Audit log entry
     await tx.auditLog.create({
       data: {
         actorId: user.id,
@@ -692,15 +667,7 @@ export async function rejectStep(
 
 /**
  * Workflow Initialization and Resubmission Helper.
- * Can be called during contract submission (Member 1 integration).
- * Accepts `tx: Prisma.TransactionClient` to participate seamlessly in parent submit transactions.
- *
- * Rules Enforced:
- * 1. Contract status guard: Only DRAFT and RETURNED contracts can be submitted (HTTP 409 for invalid states).
- * 2. Approver list validation: Disallows empty lists (HTTP 400) and duplicate approvers (HTTP 400).
- * 3. Shortened chain handling: Surplus steps from prior cycles are deleted if they have no decisions,
- *    or kept inert without WAITING/actedAt=null status to preserve decision history.
- * 4. Resubmissions restart strictly from Level 1, activating only Level 1 as PENDING.
+ * Accepts a transaction client to participate in the parent submit transaction.
  */
 export async function initializeOrResetApprovalWorkflow(
   contractFormId: string,
@@ -708,22 +675,20 @@ export async function initializeOrResetApprovalWorkflow(
   submitterId: string,
   tx: Prisma.TransactionClient,
 ): Promise<ApprovalStep[]> {
-  // 1. Validate non-empty approver list
   if (!approverIds || approverIds.length === 0) {
     throw new AppError(400, 'VALIDATION_ERROR', 'At least one approver must be assigned to initiate workflow', [
       { path: ['approverIds'], message: 'At least one approver must be assigned' },
     ]);
   }
 
-  // 2. Validate no duplicate approver IDs in the chain
   const uniqueApproverIds = new Set(approverIds);
+
   if (uniqueApproverIds.size !== approverIds.length) {
     throw new AppError(400, 'DUPLICATE_APPROVER', 'Approver list cannot contain duplicate approvers', [
       { path: ['approverIds'], message: 'Duplicate approver IDs are not allowed in the approval chain' },
     ]);
   }
 
-  // 3. Contract status guard: check form existence and editable status (participates in caller's tx)
   const form = await tx.contractForm.findUnique({
     where: { id: contractFormId },
     select: { id: true, title: true, referenceNo: true, status: true },
@@ -734,6 +699,7 @@ export async function initializeOrResetApprovalWorkflow(
   }
 
   const allowedStatuses: ContractStatus[] = [ContractStatus.DRAFT, ContractStatus.RETURNED];
+
   if (!allowedStatuses.includes(form.status)) {
     throw new AppError(
       409,
@@ -742,20 +708,24 @@ export async function initializeOrResetApprovalWorkflow(
     );
   }
 
-  // 4. Validate that all approvers exist and are active
+  // FIX: Only active users with the APPROVER role can be assigned.
   const approvers = await tx.user.findMany({
     where: {
       id: { in: approverIds },
       isActive: true,
+      role: UserRole.APPROVER,
     },
     select: { id: true, role: true },
   });
 
   if (approvers.length !== approverIds.length) {
-    throw new AppError(400, 'INVALID_APPROVER', 'One or more assigned approvers do not exist or are inactive');
+    throw new AppError(
+      400,
+      'INVALID_APPROVER',
+      'One or more assigned approvers do not exist, are inactive, or do not have the APPROVER role',
+    );
   }
 
-  // 5. Fetch existing steps for this form
   const existingSteps = await tx.approvalStep.findMany({
     where: { contractFormId },
     orderBy: { level: 'asc' },
@@ -765,8 +735,6 @@ export async function initializeOrResetApprovalWorkflow(
   const resultSteps: ApprovalStep[] = [];
 
   if (existingSteps.length > 0) {
-    // Resubmission case:
-    // Update or create active levels 1..approverIds.length
     for (let i = 0; i < approverIds.length; i++) {
       const level = i + 1;
       const approverId = approverIds[i];
@@ -778,9 +746,10 @@ export async function initializeOrResetApprovalWorkflow(
           data: {
             approverId,
             status: level === 1 ? ApprovalStatus.PENDING : ApprovalStatus.WAITING,
-            actedAt: null, // Reset actedAt for the new active cycle
+            actedAt: null,
           },
         });
+
         resultSteps.push(updated);
       } else {
         const created = await tx.approvalStep.create({
@@ -792,26 +761,28 @@ export async function initializeOrResetApprovalWorkflow(
             actedAt: null,
           },
         });
+
         resultSteps.push(created);
       }
     }
 
-    // Handle surplus levels above approverIds.length (shortened approval chain):
     if (existingSteps.length > approverIds.length) {
       for (let i = approverIds.length; i < existingSteps.length; i++) {
         const surplusStep = existingSteps[i];
+
         const hasDecisions = await tx.approvalDecision.findFirst({
           where: { approvalStepId: surplusStep.id },
         });
 
         if (!hasDecisions) {
-          // No decisions exist: safe to delete without foreign key violation or history loss
-          await tx.approvalStep.delete({ where: { id: surplusStep.id } });
+          await tx.approvalStep.delete({
+            where: { id: surplusStep.id },
+          });
         } else {
-          // Decisions exist: preserve row to maintain foreign keys and audit history.
-          // CRITICAL: Ensure status is NOT WAITING and actedAt is NOT null so that
-          // approveStep (which looks for WAITING with actedAt=null) will never activate it.
-          if (surplusStep.status === ApprovalStatus.WAITING || surplusStep.status === ApprovalStatus.PENDING) {
+          if (
+            surplusStep.status === ApprovalStatus.WAITING ||
+            surplusStep.status === ApprovalStatus.PENDING
+          ) {
             await tx.approvalStep.update({
               where: { id: surplusStep.id },
               data: { status: ApprovalStatus.RETURNED },
@@ -821,10 +792,10 @@ export async function initializeOrResetApprovalWorkflow(
       }
     }
   } else {
-    // Initial submission: create fresh sequential steps
     for (let i = 0; i < approverIds.length; i++) {
       const level = i + 1;
       const approverId = approverIds[i];
+
       const created = await tx.approvalStep.create({
         data: {
           contractFormId,
@@ -834,11 +805,11 @@ export async function initializeOrResetApprovalWorkflow(
           actedAt: null,
         },
       });
+
       resultSteps.push(created);
     }
   }
 
-  // 6. Atomic update of ContractForm status (verifies status is still in allowedStatuses)
   const updateFormResult = await tx.contractForm.updateMany({
     where: {
       id: contractFormId,
@@ -854,8 +825,8 @@ export async function initializeOrResetApprovalWorkflow(
     throw new AppError(409, 'INVALID_STATE', 'Contract status was concurrently modified or is not editable');
   }
 
-  // 7. Notify Level 1 approver
   const formIdentifier = form.referenceNo || form.title || 'Contract form';
+
   await tx.notification.create({
     data: {
       recipientId: approverIds[0],
@@ -864,7 +835,6 @@ export async function initializeOrResetApprovalWorkflow(
     },
   });
 
-  // 8. Audit log entry for submission / resubmission
   await tx.auditLog.create({
     data: {
       actorId: submitterId,

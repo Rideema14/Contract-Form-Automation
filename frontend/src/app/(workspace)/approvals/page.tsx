@@ -1,10 +1,13 @@
-
 "use client";
 
-import React from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import {  ApiError, apiRequestWithMeta } from "@/lib/api-client";
-import type { ApprovalPendingItem, PaginationMeta, PendingApprovalItem } from "@/types/approval";
+import { apiGet, ApiError } from "@/lib/api-client";
+import type {
+  ApprovalPendingItem,
+  PaginationMeta,
+  PendingApprovalsResponse,
+} from "@/types/approval";
 import {
   Table,
   TableHeader,
@@ -15,6 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { ApprovalStatusBadge } from "@/components/approvals/ApprovalStatusBadge";
 import { toast } from "sonner";
+import { Loader2, AlertCircle, RotateCcw, Inbox } from "lucide-react";
 
 export default function ApprovalsPage() {
   const searchParams = useSearchParams();
@@ -23,39 +27,42 @@ export default function ApprovalsPage() {
   const page = Number(searchParams.get("page") ?? "1");
   const pageSize = Number(searchParams.get("pageSize") ?? "20");
 
-  const [pending, setPending] = React.useState<ApprovalPendingItem[]>([]);
-  const [pagination, setPagination] = React.useState<PaginationMeta | undefined>(
+  const [pending, setPending] = useState<ApprovalPendingItem[]>([]);
+  const [pagination, setPagination] = useState<PaginationMeta | undefined>(
     undefined
   );
-  const [loading, setLoading] = React.useState(true);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  React.useEffect(() => {
-    const fetchApprovals = async () => {
-      setLoading(true);
+  const fetchApprovals = useCallback(async () => {
+    setLoading(true);
+    setError(null);
 
-      try {
-        const res = await apiRequestWithMeta<PendingApprovalItem[]>(
-  "/your-existing-approvals-endpoint"
-);
+    try {
+      const res = await apiGet<PendingApprovalsResponse>(
+        `/approvals/pending?page=${page}&pageSize=${pageSize}`
+      );
 
-setPending(res.data);
-setPagination(res.meta?.pagination);
-      } catch (err) {
-        if (err instanceof ApiError) {
-          toast.error(err.message);
-        } else {
-          toast.error("Failed to load pending approvals");
-        }
+      setPending(res.items);
+      setPagination(res.meta?.pagination);
+    } catch (err: unknown) {
+      const msg =
+        err instanceof ApiError
+          ? err.message
+          : "Failed to load pending approvals";
 
-        setPending([]);
-        setPagination(undefined);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchApprovals();
+      setError(msg);
+      toast.error(msg);
+      setPending([]);
+      setPagination(undefined);
+    } finally {
+      setLoading(false);
+    }
   }, [page, pageSize]);
+
+  useEffect(() => {
+    fetchApprovals();
+  }, [fetchApprovals]);
 
   const handlePageChange = (newPage: number) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -63,87 +70,170 @@ setPagination(res.meta?.pagination);
     router.replace(`?${params.toString()}`);
   };
 
-  if (loading) {
-    return <div className="container mx-auto p-4">Loading...</div>;
-  }
-
   return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">Pending Approvals</h1>
+    <div className="container mx-auto p-4 sm:p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">
+            Pending Approvals
+          </h1>
+          <p className="text-xs text-muted-foreground mt-1">
+            Contracts pending your review and decision in the approval workflow.
+          </p>
+        </div>
 
-      {pending.length === 0 ? (
-        <p className="text-muted-foreground">
-          No pending approvals found.
-        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={fetchApprovals}
+          disabled={loading}
+          className="gap-1.5"
+        >
+          <RotateCcw
+            className={`size-3.5 ${loading ? "animate-spin" : ""}`}
+          />
+          <span>Refresh</span>
+        </Button>
+      </div>
+
+      {loading ? (
+        <div className="flex flex-col items-center justify-center p-12 border rounded-xl bg-card text-muted-foreground gap-3">
+          <Loader2 className="animate-spin size-7 text-primary" />
+          <p className="text-xs">Loading pending approvals...</p>
+        </div>
+      ) : error ? (
+        <div className="flex flex-col items-center justify-center p-8 border border-destructive/20 bg-destructive/5 rounded-xl text-center space-y-3">
+          <div className="flex items-center gap-2 text-destructive font-medium text-sm">
+            <AlertCircle className="size-5 shrink-0" />
+            <span>{error}</span>
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            There was a problem retrieving your approvals queue.
+          </p>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={fetchApprovals}
+            className="gap-1.5"
+          >
+            <RotateCcw className="size-3.5" />
+            <span>Retry</span>
+          </Button>
+        </div>
+      ) : pending.length === 0 ? (
+        <div className="flex flex-col items-center justify-center p-12 border rounded-xl bg-card text-center space-y-3">
+          <div className="flex size-12 items-center justify-center rounded-full bg-muted">
+            <Inbox className="size-6 text-muted-foreground" />
+          </div>
+
+          <h3 className="font-semibold text-sm">No Pending Approvals</h3>
+
+          <p className="text-xs text-muted-foreground max-w-sm">
+            You do not have any contracts awaiting your review at this time.
+          </p>
+        </div>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableCell>Contract</TableCell>
-              <TableCell>Submitter</TableCell>
-              <TableCell>Level</TableCell>
-              <TableCell>Submitted At</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Action</TableCell>
-            </TableRow>
-          </TableHeader>
-
-          <TableBody>
-            {pending.map((item) => (
-              <TableRow key={item.id}>
-                <TableCell>
-                  {item.contractForm.title ?? "Untitled Contract"}
-                </TableCell>
-
-                <TableCell>
-                  {item.contractForm.createdBy.fullName}
-                </TableCell>
-
-                <TableCell>{item.level}</TableCell>
-
-                <TableCell>
-                  {new Date(item.contractForm.createdAt).toLocaleString()}
-                </TableCell>
-
-                <TableCell>
-                  <ApprovalStatusBadge status={item.status} />
-                </TableCell>
-
-                <TableCell>
-                  <Button
-                    variant="outline"
-                    onClick={() => router.push(`/approvals/${item.id}`)}
-                  >
-                    View
-                  </Button>
+        <div className="border rounded-xl bg-card overflow-hidden shadow-xs">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableCell className="font-semibold">Contract</TableCell>
+                <TableCell className="font-semibold">Submitter</TableCell>
+                <TableCell className="font-semibold">Level</TableCell>
+                <TableCell className="font-semibold">Submitted At</TableCell>
+                <TableCell className="font-semibold">Status</TableCell>
+                <TableCell className="font-semibold text-right">
+                  Action
                 </TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+
+            <TableBody>
+              {pending.map((item) => (
+                <TableRow key={item.id}>
+                  <TableCell>
+                    <div className="font-medium text-foreground">
+                      {item.contractForm.title ?? "Untitled Contract"}
+                    </div>
+
+                    {item.contractForm.referenceNo && (
+                      <div className="text-[11px] text-muted-foreground font-mono">
+                        {item.contractForm.referenceNo}
+                      </div>
+                    )}
+                  </TableCell>
+
+                  <TableCell>
+                    <div className="text-xs">
+                      {item.contractForm.createdBy.fullName}
+                    </div>
+
+                    <div className="text-[11px] text-muted-foreground">
+                      {item.contractForm.createdBy.email}
+                    </div>
+                  </TableCell>
+
+                  <TableCell>
+                    <span className="font-medium text-xs">
+                      Level {item.level}
+                    </span>
+                  </TableCell>
+
+                  <TableCell className="text-xs text-muted-foreground">
+                    {new Date(
+                      item.contractForm.submittedAt ??
+                        item.contractForm.createdAt
+                    ).toLocaleString()}
+                  </TableCell>
+
+                  <TableCell>
+                    <ApprovalStatusBadge status={item.status} />
+                  </TableCell>
+
+                  <TableCell className="text-right">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => router.push(`/approvals/${item.id}`)}
+                    >
+                      Review
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       )}
 
-      {pagination && pagination.totalPages > 0 && (
-        <div className="flex justify-between items-center mt-4">
-          <Button
-            variant="secondary"
-            disabled={page <= 1}
-            onClick={() => handlePageChange(page - 1)}
-          >
-            Previous
-          </Button>
-
+      {pagination && pagination.totalPages > 1 && (
+        <div className="flex justify-between items-center text-xs text-muted-foreground pt-2">
           <span>
-            Page {page} of {pagination.totalPages}
+            Showing page {page} of {pagination.totalPages} (
+            {pagination.totalItems} items)
           </span>
 
-          <Button
-            variant="secondary"
-            disabled={page >= pagination.totalPages}
-            onClick={() => handlePageChange(page + 1)}
-          >
-            Next
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page <= 1 || loading}
+              onClick={() => handlePageChange(page - 1)}
+            >
+              Previous
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= pagination.totalPages || loading}
+              onClick={() => handlePageChange(page + 1)}
+            >
+              Next
+            </Button>
+          </div>
         </div>
       )}
     </div>

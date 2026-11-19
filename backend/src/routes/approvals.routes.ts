@@ -10,10 +10,17 @@ import {
   rejectStepHandler,
   returnStepHandler,
 } from '../controllers/approvals.controller';
+import { initializeWorkflowHandler } from '../controllers/approvalWorkflow.controller';
 
 const router = Router();
 
 router.use(authenticate);
+
+// Initialize an approval workflow for a contract (called by Member 1 after contract creation)
+// Expects { contractFormId, approverIds } in the body.
+// Returns the created approval steps.
+router.post('/workflow', initializeWorkflowHandler);
+
 
 // Pending queue accessible to APPROVER and ADMIN
 router.get('/pending', requireRoles(UserRole.APPROVER, UserRole.ADMIN), listPendingApprovals);

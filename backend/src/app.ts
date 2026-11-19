@@ -9,6 +9,8 @@ import healthRoutes from "./routes/health.routes";
 import contractsRoutes from "./routes/contracts.routes";
 import referenceDataRoutes from "./routes/reference-data.routes";
 import approvalsRoutes from "./routes/approvals.routes";
+import usersRoutes from "./routes/users.routes";
+import notificationsRoutes from "./routes/notifications.routes";
 import authRoutes from "./modules/auth/auth.routes";
 import attachmentsRoutes from "./routes/attachments.routes";
 import { AppError } from "./utils/app-error";
@@ -30,6 +32,8 @@ app.use((req, _res, next) => {
 
 app.use("/api/health", healthRoutes);
 app.use("/api/auth", authRoutes);
+app.use("/api/users", usersRoutes);
+app.use("/api/notifications", notificationsRoutes);
 app.use("/api/forms", contractsRoutes);
 app.use("/api/forms", attachmentsRoutes);
 app.use("/api/reference-data", referenceDataRoutes);

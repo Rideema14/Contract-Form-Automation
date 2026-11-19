@@ -1,14 +1,34 @@
+
 import { Router } from 'express';
 import authenticate from '../middleware/authenticate';
 import {
-  createBidder, createContract, createCostLine, createQuotation,
-  deleteBidder, deleteContract, deleteCostLine, deleteQuotation, getContract,
-  getCostEstimate, listBidders, listContracts, listCostLines, listDrafts, listEvaluations, listQuotations,
-  saveDraft, saveEvaluations, submitContract,
-  updateBidder, updateContract, updateCostLine, updateQuotation,
+  createBidder,
+  createContract,
+  createCostLine,
+  createQuotation,
+  deleteBidder,
+  deleteContract,
+  deleteCostLine,
+  deleteQuotation,
+  getContract,
+  getCostEstimate,
+  listBidders,
+  listContracts,
+  listCostLines,
+  listDrafts,
+  listEvaluations,
+  listQuotations,
+  saveDraft,
+  saveEvaluations,
+  submitContract,
+  updateBidder,
+  updateContract,
+  updateCostLine,
+  updateQuotation,
 } from '../controllers/contracts.controller';
 
 const router = Router();
+
 router.use(authenticate);
 
 router.post('/', createContract);
@@ -34,6 +54,7 @@ router.get('/:formId/cost-lines', listCostLines);
 router.post('/:formId/cost-lines', createCostLine);
 router.patch('/:formId/cost-lines/:lineId', updateCostLine);
 router.delete('/:formId/cost-lines/:lineId', deleteCostLine);
+
 router.get('/:formId/cost-estimate', getCostEstimate);
 router.get('/:formId/evaluations', listEvaluations);
 router.put('/:formId/evaluations', saveEvaluations);
