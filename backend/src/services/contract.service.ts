@@ -172,15 +172,15 @@ export async function listContracts(
       ? {}
       : user.role === UserRole.APPROVER
         ? {
-            approvalSteps: {
-              some: {
-                approverId: user.id,
-              },
+          approvalSteps: {
+            some: {
+              approverId: user.id,
             },
-          }
+          },
+        }
         : {
-            createdById: user.id,
-          };
+          createdById: user.id,
+        };
 
   const where: Prisma.ContractFormWhereInput = {
     ...visibilityWhere,
@@ -196,29 +196,29 @@ export async function listContracts(
       : {}),
     ...(query.q
       ? {
-          OR: [
-            {
-              title: {
-                contains: query.q,
-                mode: 'insensitive',
-              },
+        OR: [
+          {
+            title: {
+              contains: query.q,
+              mode: 'insensitive',
             },
-            {
-              referenceNo: {
-                contains: query.q,
-                mode: 'insensitive',
-              },
+          },
+          {
+            referenceNo: {
+              contains: query.q,
+              mode: 'insensitive',
             },
-          ],
-        }
+          },
+        ],
+      }
       : {}),
     ...(query.from || query.to
       ? {
-          createdAt: {
-            ...(query.from ? { gte: query.from } : {}),
-            ...(query.to ? { lte: query.to } : {}),
-          },
-        }
+        createdAt: {
+          ...(query.from ? { gte: query.from } : {}),
+          ...(query.to ? { lte: query.to } : {}),
+        },
+      }
       : {}),
   };
 
@@ -571,8 +571,8 @@ export async function updateQuotation(
         ...input,
         ...(input.quotedAmount
           ? {
-              quotedAmount: new Prisma.Decimal(input.quotedAmount),
-            }
+            quotedAmount: new Prisma.Decimal(input.quotedAmount),
+          }
           : {}),
       },
       include: { currency: true },
@@ -775,16 +775,8 @@ export async function submitContract(
 
   // Transaction: update contract and initialize approval workflow.
   return prisma.$transaction(async (tx) => {
-    const now = new Date();
-
-    await tx.contractForm.update({
-      where: { id: formId },
-      data: {
-        status: ContractStatus.PENDING_APPROVAL,
-        submittedAt: now,
-      },
-    });
-
+    // Initialize or reset the approval workflow.
+    // This also updates the contract status to PENDING_APPROVAL.
     await initializeOrResetApprovalWorkflow(
       formId,
       validatedApproverIds,

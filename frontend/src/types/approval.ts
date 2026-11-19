@@ -1,14 +1,42 @@
 
-export type ApprovalStatus = 'WAITING' | 'PENDING' | 'APPROVED' | 'RETURNED' | 'REJECTED';
-export type ContractStatus = 'DRAFT' | 'PENDING_APPROVAL' | 'RETURNED' | 'APPROVED' | 'REJECTED';
+export type ApprovalStatus =
+  | 'WAITING'
+  | 'PENDING'
+  | 'APPROVED'
+  | 'RETURNED'
+  | 'REJECTED';
+
+export type ContractStatus =
+  | 'DRAFT'
+  | 'PENDING_APPROVAL'
+  | 'RETURNED'
+  | 'APPROVED'
+  | 'REJECTED';
+
 export type ApprovalDecisionValue = 'APPROVED' | 'RETURNED' | 'REJECTED';
-export type AttachmentCategory = 'SUPPORTING' | 'COST_ESTIMATE_EXCEL' | 'GENERATED_PDF';
+
+export type AttachmentCategory =
+  | 'SUPPORTING'
+  | 'COST_ESTIMATE_EXCEL'
+  | 'GENERATED_PDF';
+
 export type EvaluationType = 'TECHNICAL' | 'COMMERCIAL';
 
 export interface ApproverSummary {
   id: string;
   fullName: string;
   email: string;
+}
+
+export interface ApproverUser {
+  id: string;
+  fullName: string;
+  email: string;
+  role: string;
+}
+
+export interface ApproversResponse {
+  items: ApproverUser[];
 }
 
 export interface ContractFormSummary {
@@ -46,6 +74,10 @@ export interface PaginationMeta {
   pageSize: number;
   totalItems: number;
   totalPages: number;
+}
+
+export interface PendingApprovalsResponse {
+  items: ApprovalPendingItem[];
 }
 
 export interface ApprovalDecisionItem {

@@ -12,7 +12,7 @@ export default function HomePage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/health`, {
+    fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/api/health`, {
       credentials: "include",
       cache: "no-store"
     })

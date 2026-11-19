@@ -67,3 +67,23 @@ export async function apiPost<T>(path: string, payload?: unknown): Promise<ApiRe
 
   return body as ApiResponse<T>;
 }
+
+export async function apiPatch<T>(path: string, payload?: unknown): Promise<ApiResponse<T>> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: payload !== undefined ? JSON.stringify(payload) : undefined,
+  });
+
+  const body = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const message = body?.message || `Request failed with status ${response.status}`;
+    const code = body?.error?.code || "REQUEST_FAILED";
+    const details = body?.error?.details || [];
+    throw new ApiError(response.status, code, message, details);
+  }
+
+  return body as ApiResponse<T>;
+}
