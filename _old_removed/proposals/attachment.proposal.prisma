@@ -1,0 +1,31 @@
+// PROPOSAL ONLY - do NOT paste into schema.prisma yourself and do NOT create a migration.
+// Send to the schema coordinator (Member 1), who integrates it into the combined migration (P1).
+// Assumes ContractForm and User use String uuid ids. Adjust if the agreed ID type differs.
+
+enum AttachmentCategory {   // values must be agreed by the team (P0)
+  QUOTATION
+  COST_ESTIMATE
+  TECHNICAL_DOCUMENT
+  SUPPORTING_DOCUMENT
+  FINAL_PDF
+}
+
+model Attachment {
+  id               String             @id @default(uuid())
+  contractFormId   String
+  contractForm     ContractForm       @relation(fields: [contractFormId], references: [id], onDelete: Restrict)
+  driveFileId      String             @unique
+  filename         String             // sanitised, de-duplicated display name
+  originalFilename String             // as uploaded (untrusted, audit only)
+  mimeType         String
+  sizeBytes        Int
+  category         AttachmentCategory
+  uploadedById     String
+  uploadedBy       User               @relation(fields: [uploadedById], references: [id])
+  createdAt        DateTime           @default(now())
+
+  @@unique([contractFormId, filename])   // DB-level guard against duplicate names (race safety)
+  @@index([contractFormId])
+}
+
+// Also required (coordinator): add `attachments Attachment[]` to ContractForm and to User.

@@ -1,9 +1,45 @@
-# Placeholder: Azure frontend deployment is added after local development and acceptance tests pass.
-name: Deploy Frontend (not configured)
+name: Deploy Frontend to Azure App Service
+
 on:
   workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
-  placeholder:
+  build-and-deploy:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
     steps:
-      - run: echo "Azure deployment is not configured yet."
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build Next.js application
+        env:
+          NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+        run: npm run build
+
+      - name: Create deployment package
+        run: zip -qr ../frontend-deploy.zip .next public package.json package-lock.json node_modules next.config.ts
+
+      - name: Deploy to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.AZURE_FRONTEND_APP_NAME }}
+          publish-profile: ${{ secrets.AZURE_FRONTEND_PUBLISH_PROFILE }}
+          package: frontend-deploy.zip

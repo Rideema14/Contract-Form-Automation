@@ -1,6 +1,6 @@
 # 17. Setup Guide (Windows-friendly)
 
-> The application code is not yet implemented. These instructions describe the intended setup once `package.json` files are created in Phase 1 implementation. Commands use PowerShell.
+> The application is implemented. These Windows-friendly commands cover local development; Google Drive uploads remain disabled until the company-approved policy and private Drive configuration are supplied.
 
 ## Prerequisites
 - Node.js LTS (version to be agreed; check with `node -v`)
@@ -27,7 +27,7 @@ Use your own credentials; never commit them.
 Copy-Item backend\.env.example backend\.env
 Copy-Item frontend\.env.example frontend\.env.local
 ```
-Edit each file. Backend needs `DATABASE_URL`, `JWT_SECRET` (32+ chars), `PORT`, `FRONTEND_ORIGIN`. Frontend needs `NEXT_PUBLIC_API_BASE_URL`. Leave Google Drive values empty until Phase 3.
+Edit each file. Backend needs `DATABASE_URL`, `JWT_SECRET` (32+ chars), `PORT`, and `FRONTEND_ORIGIN`. Frontend needs `NEXT_PUBLIC_API_BASE_URL`. Keep Google OAuth credentials and any Drive folder ID empty until configured privately. The document policy in the backend example reflects the company-approved limits.
 
 ## 4. Backend
 ```powershell

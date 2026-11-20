@@ -31,7 +31,7 @@
 | Backend | Node.js, Express.js, REST APIs |
 | Database | PostgreSQL with Prisma ORM |
 | Validation / forms | Zod, React Hook Form |
-| Integrations | Google Drive API, Puppeteer, Microsoft Azure |
+| Integrations | Google Drive API, PDFMake, Microsoft Azure |
 
 No substitutions or unnecessary libraries without a documented technical reason.
 
@@ -51,11 +51,11 @@ No substitutions or unnecessary libraries without a documented technical reason.
 | CL-11 | Currencies supported and whether exchange rates are needed. | Forms, amounts |
 | CL-12 | Technical/commercial evaluation criteria, scoring scale and weighting. | Evaluations |
 | CL-13 | Excel estimate template: required columns, and whether rows are parsed into the cost breakdown or stored only as a file. | Cost estimates |
-| CL-14 | Allowed file types, maximum sizes and retention period for documents. | Documents |
+| CL-14 | **Resolved:** PDF, Excel, CSV, Word, PNG/JPEG and TXT; 10 MiB per file; 5 files per upload. Contract records, approval history and uploads are retained for the contract lifetime; audit logs are retained at least 7 years. No automatic deletion; authorized deletion must be audited. | Documents |
 | CL-15 | Which Admin permissions apply to forms (view all, edit, delete, override)? | RBAC |
-| CL-16 | Google Drive account type (Workspace vs personal), folder ownership, and access model. | Phase 3 |
+| CL-16 | **Resolved:** Personal My Drive using OAuth `drive.file` scope and an app-created root folder; no broad Drive access. | Phase 3 |
 | CL-17 | Azure subscription, region, credit amount, credit expiry date and budget limits. | Phase 2 |
-| CL-18 | Are forms ever deleted, or only archived? Data retention policy. | Database, audit |
+| CL-18 | **Resolved:** do not automatically delete contracts, approval records, audit logs or documents. Any deletion requires authorized administrative approval and an audit record. | Database, audit |
 | CL-19 | Vendor master list: pre-loaded, or created on the fly? Who may add vendor types? | Vendors |
 | CL-20 | Authentication method: email/password, or company SSO? Password policy. | Auth |
 

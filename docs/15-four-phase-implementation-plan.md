@@ -38,16 +38,16 @@ flowchart LR
 ## Phase 3: Google Drive Storage Integration
 **Objectives:** Store supporting documents and Excel estimates in Google Drive.
 **Deliverables:** Drive client, folder-per-form structure, upload/download endpoints, metadata in PostgreSQL, access-controlled downloads; updated `09-google-drive-integration.md`.
-**Dependencies:** Drive account/credentials (CL-16); file rules (CL-14); Phase 2 environment for deployed testing.
+**Dependencies:** OAuth consent credentials configured privately; company-approved upload policy (CL-14); Phase 2 environment for deployed testing.
 **Responsible:** Dev 3 (lead); Dev 2 (Excel upload integration); Dev 1 (permission checks).
-**Acceptance criteria:** Files stored in Drive and not in DB; unauthorized access blocked; failure cases leave no orphan data; works in the Azure environment.
+**Acceptance criteria:** File bytes are in Drive, metadata is in PostgreSQL, unauthorized access is blocked, and compensating cleanup is tested. Cleanup failures are logged with Drive file IDs for operator recovery; real Drive/Azure operation still needs verification.
 
 ## Phase 4: Completed Contract PDF Generation
 **Objectives:** Generate the completed contract PDF following the company's sample form.
-**Deliverables:** HTML template, Puppeteer generator, 14 sections populated, PDF stored in Drive, generate/download endpoints; updated `10-pdf-generation.md`.
-**Dependencies:** **Company sample PDF (CL-01)**; field list (CL-09); Phase 3 complete; Chromium available on Azure.
+**Deliverables:** PDFMake generator, 14 sections populated, PDF stored in Drive, generated-PDF retrieval; updated `10-pdf-generation.md`.
+**Dependencies:** **Company sample PDF (CL-01)**; field list (CL-09); Phase 3 complete.
 **Responsible:** Dev 3 (lead); Dev 2 (data mapping); Dev 1 (authorization and UI buttons).
-**Acceptance criteria:** All 14 sections render correct data; layout approved against the sample; PDF stored and retrievable by authorized users only; works on Azure.
+**Acceptance criteria:** All 14 sections render correct data; layout approved against the sample; PDF stored and retrievable by authorized users only; real Drive/Azure operation verified.
 
 ## Working in Parallel
 Phases 2 to 4 depend on Phase 1 being stable, but Dev 3 can prepare Azure and Drive groundwork while Devs 1 and 2 finish Phase 1, provided interfaces (storage adapter, form data shape) are agreed first.

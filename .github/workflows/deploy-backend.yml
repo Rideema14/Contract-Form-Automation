@@ -1,9 +1,55 @@
-# Placeholder: Azure backend deployment is added after local development and acceptance tests pass.
-name: Deploy Backend (not configured)
+name: Deploy Backend to Azure App Service
+
 on:
   workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
-  placeholder:
+  build-and-deploy:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     steps:
-      - run: echo "Azure deployment is not configured yet."
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npm run db:generate
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+          JWT_SECRET: ci-only-secret-ci-only-secret-ci-only
+
+      - name: Build backend
+        run: npm run build
+
+      - name: Install production dependencies
+        run: npm prune --omit=dev
+
+      - name: Create deployment package
+        run: zip -qr ../backend-deploy.zip package.json package-lock.json node_modules dist prisma
+
+      - name: Deploy to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.AZURE_BACKEND_APP_NAME }}
+          publish-profile: ${{ secrets.AZURE_BACKEND_PUBLISH_PROFILE }}
+          package: backend-deploy.zip

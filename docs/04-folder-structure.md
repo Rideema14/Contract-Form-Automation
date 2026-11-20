@@ -60,7 +60,7 @@ Each module is a folder that will contain `*.routes.js`, `*.controller.js`, `*.s
 | `audit` | Audit log writing and reading | Dev 3 |
 | `notifications` | Next-approver notifications | Dev 3 |
 | `documents` | Upload, metadata, authorized download | Dev 3 |
-| `pdf` | Puppeteer templates and PDF generation | Dev 3 |
+| `documents` | Private Drive uploads/downloads, metadata, PDFMake generation | Dev 3 |
 
 ## Conventions
 - Files: `kebab-case.js`; React components: `PascalCase.jsx`.
