@@ -1,4 +1,4 @@
-import { apiGet, apiPatch } from '@/lib/api-client';
+import { apiPatch, apiRequestWithMeta } from '@/lib/api-client';
 import type { NotificationItem, NotificationsResponse } from '@/types/notification';
 
 export interface GetNotificationsParams {
@@ -28,9 +28,9 @@ export async function getUserNotifications(params?: GetNotificationsParams): Pro
   const qs = searchParams.toString();
   const endpoint = qs ? `/notifications?${qs}` : '/notifications';
 
-  const response = await apiGet<NotificationsResponse>(endpoint);
+  const response = await apiRequestWithMeta<NotificationsResponse>(endpoint);
   return {
-    items: response.data?.items ?? [],
+    items: response.data.items ?? [],
     pagination: response.meta?.pagination,
   };
 }

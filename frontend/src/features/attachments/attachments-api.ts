@@ -1,8 +1,28 @@
 import { API_BASE_URL, ApiError, apiGet } from "@/lib/api-client";
 import type { ApiErrorResponse, ApiSuccessResponse } from "@/types/api";
-import type { Attachment, UploadableCategory } from "./types";
+import type { Attachment, UploadableCategory, UploadLimits } from "./types";
 
 const base = (formId: string) => `/forms/${encodeURIComponent(formId)}/attachments`;
+
+export function getAttachmentLimits(formId: string): Promise<UploadLimits> {
+  return apiGet<UploadLimits>(`/forms/${encodeURIComponent(formId)}/attachments/config`);
+}
+
+export async function generateFinalPdf(formId: string): Promise<Attachment> {
+  const response = await fetch(`${API_BASE_URL}/forms/${encodeURIComponent(formId)}/final-pdf`, {
+    method: "POST",
+    credentials: "include",
+  });
+  const payload: unknown = await response.json().catch(() => undefined);
+  if (!response.ok) {
+    const error: ApiErrorResponse =
+      payload && typeof payload === "object" && "message" in payload
+        ? (payload as ApiErrorResponse)
+        : { success: false, message: `PDF generation failed (${response.status})`, error: { code: "HTTP_ERROR", details: [] } };
+    throw new ApiError(error, response.status);
+  }
+  return (payload as ApiSuccessResponse<Attachment>).data;
+}
 
 export function listAttachments(formId: string): Promise<Attachment[]> {
   return apiGet<Attachment[]>(base(formId));

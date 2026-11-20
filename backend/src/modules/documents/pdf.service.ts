@@ -5,12 +5,6 @@ import { formatMoney, sumMoney } from './money';
 
 type Dec = { toString(): string };
 
-/**
- * Input = what contractService.getContract() and approvalService.getApprovalHistory()
- * already return (structural types, so no extra queries are needed).
- * The 14-section layout is NOT final: the company has not confirmed the exact
- * sections (CL-01/09). Change buildDocDefinition in this one place when it does.
- */
 export interface FinalPdfSource {
   form: {
     id: string;
@@ -22,11 +16,16 @@ export interface FinalPdfSource {
     selectionRationale: string | null;
     contractAmount: Dec | null;
     submittedAt: Date | null;
-    createdBy?: { fullName: string } | null;
+    createdAt: Date;
+    updatedAt: Date;
+    createdBy?: { fullName: string; email?: string } | null;
     sponsorDepartment?: { name: string } | null;
     contractCategory?: { name: string } | null;
     currency?: { code: string } | null;
-    recommendedVendor?: { name: string } | null;
+    recommendedVendor?: {
+      name: string;
+      vendorType?: { name: string } | null;
+    } | null;
     recommendedBidder?: { companyName: string } | null;
     bidders: Array<{
       companyName: string;
@@ -34,7 +33,10 @@ export interface FinalPdfSource {
       email: string | null;
       phone: string | null;
       qualifications: string | null;
-      vendor?: { name: string } | null;
+      vendor?: {
+        name: string;
+        vendorType?: { name: string } | null;
+      } | null;
       quotations: Array<{
         quotedAmount: Dec;
         currency?: { code: string } | null;
@@ -48,7 +50,25 @@ export interface FinalPdfSource {
       remarks: string | null;
       bidder?: { companyName: string } | null;
     }>;
-    costLines: Array<{ description: string; quantity: Dec | null; unitCost: Dec | null; amount: Dec }>;
+    costLines: Array<{
+      description: string;
+      quantity: Dec | null;
+      unitCost: Dec | null;
+      amount: Dec;
+    }>;
+    attachments?: Array<{
+      fileName: string;
+      category: string;
+      mimeType: string;
+      sizeBytes: number;
+      createdAt: Date;
+    }>;
+    auditLogs?: Array<{
+      action: string;
+      entityType: string;
+      createdAt: Date;
+      actor?: { fullName: string } | null;
+    }>;
   };
   history: {
     approvalSteps: Array<{ id: string; level: number; approver?: { fullName: string } | null }>;
@@ -73,14 +93,21 @@ pdfmake.addFonts({
   },
 });
 
-// The PDF contains only text: forbid URL access, and allow local files only inside the bundled font folder.
 pdfmake.setUrlAccessPolicy(() => false);
 pdfmake.setLocalAccessPolicy((file) => path.resolve(file).startsWith(fontDir + path.sep));
 
-const text = (v: string | null | undefined): string => (v && v.trim() !== '' ? v : '-');
-const money = (v: Dec | null | undefined, decimals = 2): string => (v == null ? '-' : formatMoney(v.toString(), decimals));
-const stamp = (d: Date | null | undefined): string => (d ? d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC' : '-');
-const day = (d: Date | null | undefined): string => (d ? d.toISOString().slice(0, 10) : '-');
+const text = (value: string | null | undefined): string =>
+  value && value.trim() !== '' ? value : '-';
+const money = (value: Dec | null | undefined, decimals = 2): string =>
+  value == null ? '-' : formatMoney(value.toString(), decimals);
+const stamp = (value: Date | null | undefined): string =>
+  value ? value.toISOString().replace('T', ' ').slice(0, 16) + ' UTC' : '-';
+const day = (value: Date | null | undefined): string =>
+  value ? value.toISOString().slice(0, 10) : '-';
+const size = (bytes: number): string =>
+  bytes < 1024 * 1024
+    ? `${Math.max(1, Math.ceil(bytes / 1024))} KB`
+    : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 
 function heading(label: string): Content {
   return { text: label, fontSize: 13, bold: true, margin: [0, 10, 0, 4] };
@@ -92,7 +119,7 @@ function table(headers: string[], rows: string[][], widths: Array<string | numbe
     table: {
       headerRows: 1,
       widths,
-      body: [headers.map((h) => ({ text: h, bold: true, fillColor: '#eeeeee' })), ...rows],
+      body: [headers.map((header) => ({ text: header, bold: true, fillColor: '#eeeeee' })), ...rows],
     },
     layout: 'lightHorizontalLines',
     margin: [0, 0, 0, 6],
@@ -101,109 +128,190 @@ function table(headers: string[], rows: string[][], widths: Array<string | numbe
 
 export function buildDocDefinition(src: FinalPdfSource): TDocumentDefinitions {
   const { form, history } = src;
-  const ref = form.referenceNo ?? form.id;
+  const reference = form.referenceNo ?? form.id;
   const currency = form.currency?.code ?? '';
-
-  const stepById = new Map(history.approvalSteps.map((s) => [s.id, s]));
+  const stepById = new Map(history.approvalSteps.map((step) => [step.id, step]));
   const decisions = [...history.decisions].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-  const costTotal = sumMoney(form.costLines.map((c) => c.amount.toString()));
+  const auditLogs = [...(form.auditLogs ?? [])].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  const costTotal = sumMoney(form.costLines.map((line) => line.amount.toString()));
 
   return {
-    info: { title: `${ref} - ${form.title ?? 'Contract form'}` },
+    info: { title: `${reference} - ${form.title ?? 'Contract form'}` },
     defaultStyle: { font: 'Roboto', fontSize: 10 },
     pageMargins: [40, 50, 40, 50],
     footer: (page, pages) => ({
-      text: `${ref}  |  Generated ${stamp(src.generatedAt)}  |  Page ${page} of ${pages}`,
+      text: `${reference}  |  Generated ${stamp(src.generatedAt)}  |  Page ${page} of ${pages}`,
       alignment: 'center',
       fontSize: 8,
       margin: [0, 10, 0, 0],
     }),
     content: [
       { text: 'Contract Form', fontSize: 18, bold: true },
-      { text: `${ref} - ${text(form.title)}`, fontSize: 12, margin: [0, 2, 0, 6] },
+      { text: `${reference} - ${text(form.title)}`, fontSize: 12, margin: [0, 2, 0, 6] },
 
-      heading('Project identification'),
+      heading('1. Contract / Project Identification'),
       table(
         ['Field', 'Value'],
         [
           ['Reference number', text(form.referenceNo)],
-          ['Sponsor department', text(form.sponsorDepartment?.name)],
-          ['Contract category', text(form.contractCategory?.name)],
+          ['Project / contract title', text(form.title)],
           ['Submitted by', text(form.createdBy?.fullName)],
+          ['Submitter email', text(form.createdBy?.email)],
           ['Submitted at', stamp(form.submittedAt)],
-          ['Status', form.status],
+          ['Current status', form.status],
         ],
-        ['35%', '*']
+        ['35%', '*'],
       ),
 
-      heading('Scope of work'),
-      { text: text(form.scope), margin: [0, 0, 0, 4] },
-      heading('Procurement rationale'),
-      { text: text(form.procurementRationale), margin: [0, 0, 0, 4] },
+      heading('2. Sponsor Department'),
+      { text: text(form.sponsorDepartment?.name), margin: [0, 0, 0, 4] },
 
-      heading('Contract value and recommendation'),
+      heading('3. Contract Category and Scope'),
       table(
         ['Field', 'Value'],
         [
-          ['Contract amount', form.contractAmount == null ? '-' : `${money(form.contractAmount)} ${currency}`.trim()],
+          ['Contract category', text(form.contractCategory?.name)],
+          ['Scope of work', text(form.scope)],
+        ],
+        ['35%', '*'],
+      ),
+
+      heading('4. Procurement / Sourcing Rationale'),
+      { text: text(form.procurementRationale), margin: [0, 0, 0, 4] },
+
+      heading('5. Vendor / Contractor Details'),
+      table(
+        ['Vendor / contractor', 'Vendor type', 'Contact person', 'Email', 'Phone'],
+        form.bidders.map((bidder) => [
+          text(bidder.vendor?.name ?? bidder.companyName),
+          text(bidder.vendor?.vendorType?.name),
+          text(bidder.contactPerson),
+          text(bidder.email),
+          text(bidder.phone),
+        ]),
+        ['*', '*', '*', '*', '*'],
+      ),
+
+      heading('6. Contract Amount and Currency'),
+      table(
+        ['Field', 'Value'],
+        [['Contract amount', `${money(form.contractAmount)} ${currency}`.trim()]],
+        ['35%', '*'],
+      ),
+
+      heading('7. Budget and Cost Estimate'),
+      table(
+        ['Description', 'Quantity', 'Unit cost', 'Amount'],
+        form.costLines.map((line) => [
+          text(line.description),
+          money(line.quantity, 2),
+          money(line.unitCost, 2),
+          money(line.amount),
+        ]),
+        ['*', 'auto', 'auto', 'auto'],
+      ),
+      { text: `Total: ${costTotal} ${currency}`.trim(), bold: true, alignment: 'right', margin: [0, 0, 0, 6] },
+
+      heading('8. Bidders and Quotations'),
+      table(
+        ['Bidder', 'Qualifications', 'Quoted amount', 'Quotation date', 'Notes'],
+        form.bidders.flatMap((bidder) =>
+          bidder.quotations.length
+            ? bidder.quotations.map((quotation) => [
+                text(bidder.companyName),
+                text(bidder.qualifications),
+                `${money(quotation.quotedAmount)} ${quotation.currency?.code ?? ''}`.trim(),
+                day(quotation.quotationDate),
+                text(quotation.notes),
+              ])
+            : [[text(bidder.companyName), text(bidder.qualifications), '-', '-', '-']],
+        ),
+        ['*', '*', 'auto', 'auto', '*'],
+      ),
+
+      heading('9. Technical Evaluation'),
+      table(
+        ['Bidder', 'Score', 'Remarks'],
+        form.evaluations
+          .filter((evaluation) => evaluation.type === 'TECHNICAL')
+          .map((evaluation) => [
+            text(evaluation.bidder?.companyName),
+            money(evaluation.score, 2),
+            text(evaluation.remarks),
+          ]),
+        ['*', 'auto', '*'],
+      ),
+
+      heading('10. Commercial Evaluation'),
+      table(
+        ['Bidder', 'Score', 'Remarks'],
+        form.evaluations
+          .filter((evaluation) => evaluation.type === 'COMMERCIAL')
+          .map((evaluation) => [
+            text(evaluation.bidder?.companyName),
+            money(evaluation.score, 2),
+            text(evaluation.remarks),
+          ]),
+        ['*', 'auto', '*'],
+      ),
+
+      heading('11. Recommended Vendor and Selection Rationale'),
+      table(
+        ['Field', 'Value'],
+        [
           ['Recommended vendor', text(form.recommendedVendor?.name)],
           ['Recommended bidder', text(form.recommendedBidder?.companyName)],
           ['Selection rationale', text(form.selectionRationale)],
         ],
-        ['35%', '*']
+        ['35%', '*'],
       ),
 
-      heading('Bidders'),
+      heading('12. Supporting Documents'),
       table(
-        ['Company', 'Contact', 'Qualifications'],
-        form.bidders.map((b) => [
-          text(b.companyName),
-          [b.contactPerson, b.email, b.phone].filter(Boolean).join(', ') || '-',
-          text(b.qualifications),
+        ['File name', 'Category', 'File type', 'Size', 'Uploaded'],
+        (form.attachments ?? []).map((attachment) => [
+          text(attachment.fileName),
+          attachment.category,
+          attachment.mimeType,
+          size(attachment.sizeBytes),
+          stamp(attachment.createdAt),
         ]),
-        ['*', '*', '*']
+        ['*', '*', '*', 'auto', 'auto'],
       ),
 
-      heading('Quotations'),
-      table(
-        ['Bidder', 'Quoted amount', 'Date', 'Notes'],
-        form.bidders.flatMap((b) =>
-          b.quotations.map((q) => [
-            text(b.companyName),
-            `${money(q.quotedAmount)} ${q.currency?.code ?? ''}`.trim(),
-            day(q.quotationDate),
-            text(q.notes),
-          ])
-        ),
-        ['*', 'auto', 'auto', '*']
-      ),
-
-      heading('Technical and commercial evaluation'),
-      table(
-        ['Bidder', 'Type', 'Score', 'Remarks'],
-        form.evaluations.map((e) => [text(e.bidder?.companyName), e.type, money(e.score, 2), text(e.remarks)]),
-        ['*', 'auto', 'auto', '*']
-      ),
-
-      heading('Cost estimate'),
-      table(
-        ['Description', 'Quantity', 'Unit cost', 'Amount'],
-        form.costLines.map((c) => [text(c.description), money(c.quantity, 2), money(c.unitCost, 2), money(c.amount)]),
-        ['*', 'auto', 'auto', 'auto']
-      ),
-      { text: `Total: ${costTotal} ${currency}`.trim(), bold: true, alignment: 'right', margin: [0, 0, 0, 6] },
-
-      heading('Approval history'),
+      heading('13. Approval History'),
       table(
         ['Level', 'Approver', 'Decision', 'Comment', 'Date'],
-        decisions.map((d) => [
-          String(stepById.get(d.approvalStepId)?.level ?? '-'),
-          text(d.actor?.fullName ?? stepById.get(d.approvalStepId)?.approver?.fullName),
-          d.decision,
-          text(d.comment),
-          stamp(d.createdAt),
+        decisions.map((decision) => [
+          String(stepById.get(decision.approvalStepId)?.level ?? '-'),
+          text(decision.actor?.fullName ?? stepById.get(decision.approvalStepId)?.approver?.fullName),
+          decision.decision,
+          text(decision.comment),
+          stamp(decision.createdAt),
         ]),
-        ['auto', '*', 'auto', '*', 'auto']
+        ['auto', '*', 'auto', '*', 'auto'],
+      ),
+
+      heading('14. Audit / Record Information'),
+      table(
+        ['Record', 'Value'],
+        [
+          ['Contract record ID', form.id],
+          ['Created at', stamp(form.createdAt)],
+          ['Last updated at', stamp(form.updatedAt)],
+          ['PDF generated at', stamp(src.generatedAt)],
+        ],
+        ['35%', '*'],
+      ),
+      table(
+        ['Audit action', 'Entity', 'Actor', 'Date'],
+        auditLogs.map((entry) => [
+          entry.action,
+          entry.entityType,
+          text(entry.actor?.fullName),
+          stamp(entry.createdAt),
+        ]),
+        ['*', '*', '*', 'auto'],
       ),
     ],
   };

@@ -25,6 +25,7 @@ import {
   returnStep,
 } from './services/approval.service';
 import * as approvalService from './services/approval.service';
+import * as documentsRuntime from './modules/documents/documents.runtime';
 import {
   approveStepHandler,
   getApprovalDetail,
@@ -936,6 +937,36 @@ describe('Approvals Controller Handlers', () => {
     expect(validCtx.res.json).toHaveBeenCalledWith(expect.objectContaining({
       success: true,
       message: 'Contract approved successfully',
+    }));
+  });
+
+  it('keeps final approval successful when final PDF generation fails', async () => {
+    const validCtx = createMockContext({
+      params: { id: validUUID },
+      body: {},
+    });
+    vi.spyOn(approvalService, 'approveStep').mockResolvedValue({
+      stepId: validUUID,
+      status: ApprovalStatus.APPROVED,
+      contractStatus: ContractStatus.APPROVED,
+      contractFormId: 'form-1',
+    } as never);
+    vi.spyOn(documentsRuntime, 'generateAndStoreFinalPdf').mockRejectedValue(
+      new Error('Drive unavailable')
+    );
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await approveStepHandler(validCtx.req, validCtx.res, validCtx.next);
+
+    expect(validCtx.next).not.toHaveBeenCalled();
+    expect(validCtx.res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      data: expect.objectContaining({
+        finalPdf: {
+          status: 'failed',
+          message: 'The contract was approved, but its PDF could not be generated. An administrator can retry.',
+        },
+      }),
     }));
   });
 

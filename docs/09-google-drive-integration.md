@@ -1,38 +1,42 @@
 # 09. Google Drive Integration
 
-> **Status:** Planned (Phase 3). Google Drive is **not configured**. No credentials exist in this repository.
+> **Implementation status:** Backend integration and authorized attachment routes are implemented. A real Google Drive account/folder has not been configured or verified. Production readiness still requires OAuth setup and real Drive verification.
 
 ## What Lives Where
-| Stored in Google Drive | Stored in PostgreSQL (`documents` table) |
+| Stored in Google Drive | Stored in PostgreSQL (`Attachment`) |
 |---|---|
-| Actual file contents: supporting documents, Excel estimates, generated PDFs | Metadata only: `id`, `form_id`, `type`, `file_name`, `mime_type`, `size_bytes`, `drive_file_id`, `uploaded_by`, `created_at` |
+| Supporting documents, Excel estimates, generated PDFs | Attachment metadata and the private Drive file ID |
 
-PostgreSQL never stores file bytes. Drive never stores application logic or permissions.
+PostgreSQL never stores file bytes. The browser never receives a Drive ID or direct Drive URL.
 
-## Planned Approach
-- The backend authenticates to Drive using a **service account** (assumption; confirm with CL-16). Credentials are supplied by environment variables, never committed.
-- A root folder (`GOOGLE_DRIVE_ROOT_FOLDER_ID`) holds one subfolder per form (naming convention proposed: by form ID/reference).
-- Drive files are **not shared publicly**. Only the service account can access them.
+## Configuration
+Set these backend-only values in `backend/.env` or the deployment secret store:
 
-## Upload Flow
-1. Client uploads file to `POST /forms/:id/documents` (multipart).
-2. Backend verifies login, role, ownership and form status.
-3. Validates file type and size (limits per CL-14).
-4. Uploads to the form's Drive folder via the Drive API.
-5. Saves metadata plus `drive_file_id` in PostgreSQL.
-6. Writes an audit log entry.
-If the Drive upload fails, no metadata row is created. If the DB write fails after upload, the backend removes the orphaned Drive file.
+- Personal My Drive: set `GOOGLE_DRIVE_AUTH_MODE=oauth` and configure the OAuth client ID, client secret, and refresh token in secrets. The backend uses the narrow `drive.file` scope and creates an app-owned root folder when no folder ID is configured.
+- Workspace Shared Drive: set `GOOGLE_DRIVE_AUTH_MODE=service-account`, provide `GOOGLE_APPLICATION_CREDENTIALS` as a key-file path under gitignored `backend/secrets/`, and set the approved `GOOGLE_DRIVE_FOLDER_ID`.
 
-## Form Association
-Each document row carries `form_id`. Generated PDFs use type `GENERATED_PDF` and are versioned (a new PDF adds a row; older ones are retained).
+Never commit credentials or set them in frontend/`NEXT_PUBLIC_` configuration. A configured OAuth folder ID must be app-created or explicitly selected by the OAuth app; an arbitrary existing folder may not be visible under `drive.file`. Service accounts cannot own files in a person's My Drive. See [google-drive-setup.md](google-drive-setup.md) for setup details.
 
-## Access Control and Download
-1. Client calls `GET /documents/:id/download`.
-2. Backend checks the user is owner, current/past approver of that form, or Admin.
-3. Backend streams the file from Drive to the client. The Drive ID and direct Drive links are never exposed.
+The configured folder is the root; the backend creates/reuses one child folder per contract form. Files are not made public. The backend uses the Drive `drive.file` scope and mediates every download.
 
-## Local Development
-Until Phase 3, a local stub storage adapter may be used behind the same interface so other modules are unaffected. Environment variables: see `.env.example`.
+## Upload Policy
+The approved settings in `.env.example` allow PDF, Excel, CSV, Word, PNG/JPEG and TXT files; each file is limited to 10 MiB and each request to 5 files. Contract records, approval history, and documents are retained for the contract lifetime; audit logs are retained at least 7 years, subject to organizational and legal requirements. No automatic deletion is allowed. Authorized administrative deletion must be recorded in the audit history.
 
-## Open Questions
-CL-14 (types/sizes/retention), CL-16 (account type, folder ownership, quota).
+Contract deletion is a manual Admin-only action that requires a reason and explicit confirmation. It first removes the contract's Drive files; if that fails, database records are retained so the Admin can retry. On success, the approval workflow and contract data are deleted, all existing audit events are retained without their contract foreign key, and a `CONTRACT_DELETED` audit event records the Admin and reason. No retention/deletion job runs automatically.
+
+Validation checks extension, reported MIME type, filename, size, and request file count. It does not claim antivirus or malware scanning.
+
+## Application Routes
+- `POST /api/forms/:formId/attachments` — authorized creator upload while the form is editable.
+- `GET /api/forms/:formId/attachments` — authorized attachment metadata.
+- `GET /api/forms/:formId/attachments/:attachmentId/view` — inline view for supported types.
+- `GET /api/forms/:formId/attachments/:attachmentId/download` — authorized backend-mediated download.
+- `POST /api/forms/:formId/final-pdf` — administrator retry/generation endpoint; final approval also triggers PDF generation automatically.
+- `DELETE /api/forms/:formId` — Admin only; requires a reason and explicit confirmation, removes Drive files before database records, and retains prior audit events plus an audit event for the deletion.
+
+The backend checks form access on every list, view, and download request. It returns safe metadata only and never returns the Drive ID.
+
+## Remaining External Verification
+1. Configure OAuth credentials only in local/deployment secrets; leave the folder ID blank to use an app-owned root under `drive.file`.
+2. Test upload, download, and cleanup using a non-production folder, then verify private sharing settings.
+3. Obtain the company sample contract PDF for final visual acceptance of generated PDFs.

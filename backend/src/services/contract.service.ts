@@ -299,7 +299,11 @@ export async function listContracts(
         sponsorDepartment: true,
         contractCategory: true,
         currency: true,
-        recommendedVendor: true,
+        recommendedVendor: {
+          include: {
+            vendorType: true,
+          },
+        },
       },
     }),
     prisma.contractForm.count({ where }),
@@ -333,16 +337,28 @@ export async function getContract(formId: string, user: AuthUser) {
       sponsorDepartment: true,
       contractCategory: true,
       currency: true,
-      recommendedVendor: true,
+      recommendedVendor: {
+        include: {
+          vendorType: true,
+        },
+      },
       recommendedBidder: {
         include: {
-          vendor: true,
+          vendor: {
+            include: {
+              vendorType: true,
+            },
+          },
         },
       },
       bidders: {
         orderBy: { sortOrder: 'asc' },
         include: {
-          vendor: true,
+          vendor: {
+            include: {
+              vendorType: true,
+            },
+          },
           quotations: {
             include: {
               currency: true,
@@ -379,7 +395,14 @@ export async function getContract(formId: string, user: AuthUser) {
         },
       },
       approvalDecisions: true,
-      auditLogs: true,
+      auditLogs: {
+        orderBy: { createdAt: 'asc' },
+        include: {
+          actor: {
+            select: { fullName: true },
+          },
+        },
+      },
     },
   });
 }
@@ -438,8 +461,27 @@ export async function listDrafts(user: AuthUser) {
   });
 }
 
-export async function deleteContract(formId: string, user: AuthUser) {
-  await getEditableForm(formId, user);
+export async function deleteContract(
+  formId: string,
+  user: AuthUser,
+  reason: string
+) {
+  assertAuthenticated(user);
+  if (user.role !== UserRole.ADMIN) {
+    throw new AppError(
+      403,
+      'FORBIDDEN',
+      'Only an administrator may authorize contract deletion'
+    );
+  }
+
+  const form = await prisma.contractForm.findUnique({
+    where: { id: formId },
+    select: { id: true, referenceNo: true, title: true },
+  });
+  if (!form) {
+    throw new AppError(404, 'FORM_NOT_FOUND', 'Contract form not found');
+  }
 
   return prisma.$transaction(async (tx) => {
     await tx.contractForm.update({
@@ -454,50 +496,43 @@ export async function deleteContract(formId: string, user: AuthUser) {
       where: { contractFormId: formId },
       select: { id: true },
     });
-
     const bidderIds = bidders.map((bidder) => bidder.id);
 
     if (bidderIds.length) {
       await tx.quotation.deleteMany({
         where: { bidderId: { in: bidderIds } },
       });
-
       await tx.evaluation.deleteMany({
         where: { bidderId: { in: bidderIds } },
       });
     }
 
-    await tx.approvalDecision.deleteMany({
+    await tx.approvalDecision.deleteMany({ where: { contractFormId: formId } });
+    await tx.approvalStep.deleteMany({ where: { contractFormId: formId } });
+    await tx.attachment.deleteMany({ where: { contractFormId: formId } });
+    await tx.notification.deleteMany({ where: { contractFormId: formId } });
+    await tx.costLine.deleteMany({ where: { contractFormId: formId } });
+    await tx.bidder.deleteMany({ where: { contractFormId: formId } });
+
+    await tx.auditLog.updateMany({
       where: { contractFormId: formId },
+      data: { contractFormId: null },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: user.id,
+        action: 'CONTRACT_DELETED',
+        entityType: 'ContractForm',
+        entityId: formId,
+        details: {
+          reason,
+          referenceNo: form.referenceNo,
+          title: form.title,
+        },
+      },
     });
 
-    await tx.approvalStep.deleteMany({
-      where: { contractFormId: formId },
-    });
-
-    await tx.attachment.deleteMany({
-      where: { contractFormId: formId },
-    });
-
-    await tx.notification.deleteMany({
-      where: { contractFormId: formId },
-    });
-
-    await tx.auditLog.deleteMany({
-      where: { contractFormId: formId },
-    });
-
-    await tx.costLine.deleteMany({
-      where: { contractFormId: formId },
-    });
-
-    await tx.bidder.deleteMany({
-      where: { contractFormId: formId },
-    });
-
-    return tx.contractForm.delete({
-      where: { id: formId },
-    });
+    return tx.contractForm.delete({ where: { id: formId } });
   });
 }
 

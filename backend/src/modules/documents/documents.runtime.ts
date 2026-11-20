@@ -46,3 +46,7 @@ const finalPdfService = createFinalPdfService({
 export function generateAndStoreFinalPdf(formId: string, actor: FinalPdfActor) {
   return finalPdfService.generateAndStoreFinalPdf(formId, actor);
 }
+
+export function deleteContractAttachments(formId: string) {
+  return documentService.deleteFilesForContract(formId);
+}

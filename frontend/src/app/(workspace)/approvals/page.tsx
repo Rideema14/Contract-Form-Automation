@@ -61,7 +61,11 @@ export default function ApprovalsPage() {
   }, [page, pageSize]);
 
   useEffect(() => {
-    fetchApprovals();
+    const timeoutId = window.setTimeout(() => {
+      void fetchApprovals();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [fetchApprovals]);
 
   const handlePageChange = (newPage: number) => {

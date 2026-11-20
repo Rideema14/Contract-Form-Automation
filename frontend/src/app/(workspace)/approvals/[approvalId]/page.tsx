@@ -50,7 +50,11 @@ if (detailRes.contractFormId) {
   }, [params.approvalId]);
 
   useEffect(() => {
-    loadData();
+    const timeoutId = window.setTimeout(() => {
+      void loadData();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [loadData]);
 
   const refreshData = async () => {

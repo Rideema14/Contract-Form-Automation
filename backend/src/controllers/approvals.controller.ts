@@ -14,6 +14,7 @@ import * as approvalService from '../services/approval.service';
 
 import { AppError } from '../utils/app-error';
 import { sendSuccess } from '../utils/response';
+import { generateAndStoreFinalPdf } from '../modules/documents/documents.runtime';
 
 function parse<T>(result: {
   success: boolean;
@@ -116,18 +117,42 @@ export async function approveStepHandler(
       approveActionSchema.safeParse(req.body)
     );
 
+    const currentUser = user(req);
     const data = await approvalService.approveStep(
       id,
-      user(req),
+      currentUser,
       body
     );
+
+    let finalPdf: { status: 'not_required' | 'generated' | 'failed'; message?: string } = {
+      status: 'not_required',
+    };
+
+    if (data.contractStatus === 'APPROVED') {
+      try {
+        await generateAndStoreFinalPdf(data.contractFormId, {
+          id: currentUser.id,
+          role: currentUser.role,
+        });
+        finalPdf = { status: 'generated' };
+      } catch (error) {
+        console.error('Final PDF generation failed after contract approval', {
+          contractFormId: data.contractFormId,
+          error,
+        });
+        finalPdf = {
+          status: 'failed',
+          message: 'The contract was approved, but its PDF could not be generated. An administrator can retry.',
+        };
+      }
+    }
 
     sendSuccess(
       req,
       res,
       200,
       'Contract approved successfully',
-      data
+      { ...data, finalPdf }
     );
   } catch (error) {
     next(error);

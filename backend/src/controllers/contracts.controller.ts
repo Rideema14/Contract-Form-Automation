@@ -1,5 +1,6 @@
 
 import { NextFunction, Request, Response } from 'express';
+import { z } from 'zod';
 
 import {
   bidderParamsSchema,
@@ -21,6 +22,7 @@ import * as contractService from '../services/contract.service';
 
 import { AppError } from '../utils/app-error';
 import { sendSuccess } from '../utils/response';
+import { deleteContractAttachments } from '../modules/documents/documents.runtime';
 
 function parse<T>(result: {
   success: boolean;
@@ -155,8 +157,21 @@ export async function listDrafts(req: Request, res: Response, next: NextFunction
 export async function deleteContract(req: Request, res: Response, next: NextFunction) {
   try {
     const { id } = parse(contractIdSchema.safeParse(req.params));
-    await contractService.deleteContract(id, user(req));
-    sendSuccess(req, res, 200, 'Contract deleted', { id });
+    const currentUser = user(req);
+    if (currentUser.role !== 'ADMIN') {
+      throw new AppError(403, 'FORBIDDEN', 'Only an administrator may authorize contract deletion');
+    }
+
+    const body = parse(
+      z.object({
+        reason: z.string().trim().min(10).max(1000),
+        confirm: z.literal(true),
+      }).strict().safeParse(req.body)
+    );
+
+    await deleteContractAttachments(id);
+    await contractService.deleteContract(id, currentUser, body.reason);
+    sendSuccess(req, res, 200, 'Contract deleted; audit history retained', { id });
   } catch (error) {
     next(error);
   }

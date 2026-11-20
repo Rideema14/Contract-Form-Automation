@@ -14,7 +14,7 @@ The backend separately calls Google Drive over HTTPS for private file storage.
 
 Rules:
 - The browser never connects directly to PostgreSQL or to Google Drive with private credentials.
-- PDFMake runs inside the Express backend (`backend/src/services/pdf.service.ts`); it is not a separate service.
+- PDFMake runs inside the Express backend (`backend/src/modules/documents/pdf.service.ts`); it is not a separate service.
 - One Git repository with separate `frontend/` and `backend/` apps. PostgreSQL is a local service, not a folder in the repo.
 - Prisma schema and migrations live in `backend/prisma/`.
 - Azure deployment happens only after local development and acceptance tests pass (see `deployment-azure.md`).

@@ -1,7 +1,7 @@
 # 03. System Architecture
 
 ## Overview
-A three-tier web application. The browser talks to a Next.js frontend, which calls an Express REST API. The API uses PostgreSQL (via Prisma) for structured data and Google Drive for files. Puppeteer renders PDFs on the backend. Everything is deployed on Microsoft Azure.
+A three-tier web application. The browser talks to a Next.js frontend, which calls an Express REST API. The API uses PostgreSQL (via Prisma) for structured data and Google Drive for files. PDFMake renders PDFs inside the backend. Everything is intended to be deployed on Microsoft Azure.
 
 ## Diagram
 ```mermaid
@@ -10,7 +10,7 @@ flowchart LR
     FE -->|REST / JSON| BE[Express.js Backend API]
     BE -->|Prisma ORM| DB[(PostgreSQL)]
     BE -->|Google Drive API| GD[(Google Drive<br/>files and PDFs)]
-    BE --> PDF[Puppeteer<br/>PDF renderer]
+    BE --> PDF[PDFMake<br/>in-process renderer]
     PDF -->|generated PDF| BE
     BE --> NT[Notification service]
     subgraph Azure
@@ -35,7 +35,7 @@ flowchart LR
 - Authentication, RBAC and ownership checks in middleware.
 - Server-side Zod validation of every request.
 - Business rules: draft/submit rules, approval sequencing, audit logging.
-- Orchestrates Google Drive uploads/downloads and Puppeteer PDF generation.
+- Orchestrates Google Drive uploads/downloads and PDFMake generation.
 - Creates notifications for the next approver.
 
 ### PostgreSQL + Prisma
@@ -46,8 +46,8 @@ flowchart LR
 - Stores the **file contents** of supporting documents, Excel estimates and generated PDFs.
 - PostgreSQL stores only metadata and the Drive file ID. See [09-google-drive-integration.md](09-google-drive-integration.md).
 
-### Puppeteer
-- Renders an HTML template populated from form data into PDF. See [10-pdf-generation.md](10-pdf-generation.md).
+### PDFMake
+- Renders the final PDF from saved form data inside the Express backend. See [10-pdf-generation.md](10-pdf-generation.md).
 
 ### Microsoft Azure
 - Hosts the frontend, backend and managed PostgreSQL; holds environment configuration and secrets. See [11-azure-deployment.md](11-azure-deployment.md).

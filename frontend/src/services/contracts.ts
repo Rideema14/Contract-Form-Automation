@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiRequestWithMeta } from "@/lib/api-client";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiRequest, apiRequestWithMeta } from "@/lib/api-client";
 import type {
   Bidder,
   Contract,
@@ -48,10 +48,6 @@ export function listContracts(
   }));
 }
 
-export function deleteContract(id: string): Promise<{ id: string }> {
-  return apiDelete<{ id: string }>(`/forms/${id}`);
-}
-
 export function getContract(id: string): Promise<Contract> {
   return apiGet<Contract>(`/forms/${id}`);
 }
@@ -68,8 +64,18 @@ export function saveDraft(id: string, body: ContractDraft): Promise<Contract> {
   return apiPost<Contract>(`/forms/${id}/save-draft`, body);
 }
 
-export function submitContract(id: string): Promise<Contract> {
-  return apiPost<Contract>(`/forms/${id}/submit`, {});
+export function deleteContract(
+  id: string,
+  body: { reason: string; confirm: true },
+): Promise<{ id: string }> {
+  return apiRequest<{ id: string }>(`/forms/${id}`, {
+    method: "DELETE",
+    body: JSON.stringify(body),
+  });
+}
+
+export function submitContract(id: string, approverIds: string[]): Promise<Contract> {
+  return apiPost<Contract>(`/forms/${id}/submit`, { approverIds });
 }
 
 export function getReferenceData(): Promise<ReferenceData> {

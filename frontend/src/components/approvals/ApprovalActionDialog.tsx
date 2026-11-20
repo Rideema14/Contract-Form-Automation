@@ -32,6 +32,13 @@ interface ApprovalActionDialogProps {
   onSuccess: () => void;
 }
 
+interface ApprovalActionResponse {
+  finalPdf?: {
+    status: 'not_required' | 'generated' | 'failed';
+    message?: string;
+  };
+}
+
 export function ApprovalActionDialog({
   isOpen,
   onClose,
@@ -88,17 +95,21 @@ export function ApprovalActionDialog({
           ? `/approvals/${stepId}/return`
           : `/approvals/${stepId}/reject`;
 
-      await apiPost(endpoint, {
+      const result = await apiPost<ApprovalActionResponse>(endpoint, {
         comment: trimmedComment || null,
       });
 
-      toast.success(
-        isApprove
-          ? 'Contract approved successfully'
-          : isReturn
-            ? 'Contract returned to creator for changes'
-            : 'Contract rejected'
-      );
+      if (result.finalPdf?.status === 'failed') {
+        toast.error(result.finalPdf.message ?? 'The contract was approved, but its PDF could not be generated.');
+      } else {
+        toast.success(
+          isApprove
+            ? 'Contract approved successfully'
+            : isReturn
+              ? 'Contract returned to creator for changes'
+              : 'Contract rejected'
+        );
+      }
 
       setComment('');
       onSuccess();

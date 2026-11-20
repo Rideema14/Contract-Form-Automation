@@ -3,7 +3,7 @@ flowchart LR
     FE -->|REST / JSON| BE[Express.js Backend API]
     BE -->|Prisma ORM| DB[(PostgreSQL)]
     BE -->|Google Drive API| GD[(Google Drive<br/>files and PDFs)]
-    BE --> PDF[Puppeteer<br/>PDF renderer]
+    BE --> PDF[PDFMake<br/>in-process renderer]
     PDF -->|generated PDF| BE
     BE --> NT[Notification service]
     subgraph Azure

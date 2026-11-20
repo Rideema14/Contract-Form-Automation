@@ -7,15 +7,25 @@ import { useAuth } from '@/hooks/useAuth';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { Badge } from '@/components/ui/badge';
 import { FileText } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { logout } from '@/services/auth';
+import { useRouter } from 'next/navigation';
 
 export function WorkspaceHeader() {
   const pathname = usePathname();
+  const router = useRouter();
   const { authUser } = useAuth();
 
   const navLinks = [
     { label: 'Dashboard', href: '/dashboard' },
     { label: 'Contracts', href: '/contracts' },
     { label: 'Approvals', href: '/approvals' },
+    ...(authUser?.role === 'ADMIN'
+      ? [
+          { label: 'Users', href: '/admin/users' },
+          { label: 'Reference data', href: '/admin/reference-data' },
+        ]
+      : []),
   ];
 
   return (
@@ -64,6 +74,16 @@ export function WorkspaceHeader() {
                 {authUser.role}
               </Badge>
             </div>
+          )}
+          {authUser && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => void logout().then(() => router.replace('/login')).catch(() => undefined)}
+            >
+              Sign out
+            </Button>
           )}
         </div>
       </div>

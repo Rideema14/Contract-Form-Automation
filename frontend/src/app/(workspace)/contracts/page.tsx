@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -53,6 +54,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ApiError } from "@/lib/api-client";
+import { useAuth } from "@/hooks/useAuth";
 import { logout } from "@/services/auth";
 import { deleteContract, listContracts } from "@/services/contracts";
 import type {
@@ -91,6 +93,7 @@ function getErrorMessage(error: unknown): string {
 
 export default function ContractsPage() {
   const router = useRouter();
+  const { authUser } = useAuth();
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [pagination, setPagination] = useState<PaginationMetadata>({
     page: 1,
@@ -105,8 +108,11 @@ export default function ContractsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Contract | null>(null);
+  const [deletionReason, setDeletionReason] = useState("");
+  const [deletionConfirmed, setDeletionConfirmed] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const isAdmin = authUser?.role === "ADMIN";
 
   const loadContracts = useCallback(async () => {
     setIsLoading(true);
@@ -156,13 +162,20 @@ export default function ContractsPage() {
   }
 
   async function confirmDelete() {
-    if (!deleteTarget) return;
+    if (!deleteTarget || !isAdmin || deletionReason.trim().length < 10 || !deletionConfirmed) {
+      return;
+    }
 
     setIsDeleting(true);
     try {
-      await deleteContract(deleteTarget.id);
-      toast.success("Draft deleted");
+      await deleteContract(deleteTarget.id, {
+        reason: deletionReason.trim(),
+        confirm: true,
+      });
+      toast.success("Contract deleted. Audit history was retained.");
       setDeleteTarget(null);
+      setDeletionReason("");
+      setDeletionConfirmed(false);
       if (contracts.length === 1 && page > 1) {
         setPage((currentPage) => currentPage - 1);
       } else {
@@ -172,7 +185,7 @@ export default function ContractsPage() {
       toast.error(
         deleteError instanceof ApiError
           ? deleteError.message
-          : "Could not delete the draft.",
+          : "Could not delete the contract.",
       );
     } finally {
       setIsDeleting(false);
@@ -383,17 +396,19 @@ export default function ContractsPage() {
                                 >
                                   <Pencil />
                                 </Link>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon-sm"
-                                  className="text-destructive hover:text-destructive"
-                                  aria-label={`Delete ${contract.title || "contract"}`}
-                                  onClick={() => setDeleteTarget(contract)}
-                                >
-                                  <Trash2 />
-                                </Button>
                               </>
+                            )}
+                            {isAdmin && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                className="text-destructive hover:text-destructive"
+                                aria-label={`Delete ${contract.title || "contract"}`}
+                                onClick={() => setDeleteTarget(contract)}
+                              >
+                                <Trash2 />
+                              </Button>
                             )}
                           </div>
                         </TableCell>
@@ -441,33 +456,60 @@ export default function ContractsPage() {
           </CardContent>
         </Card>
       </div>
-
       <Dialog
         open={deleteTarget !== null}
         onOpenChange={(open) => {
-          if (!open && !isDeleting) setDeleteTarget(null);
+          if (!open && !isDeleting) {
+            setDeleteTarget(null);
+            setDeletionReason("");
+            setDeletionConfirmed(false);
+          }
         }}
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete draft?</DialogTitle>
+            <DialogTitle>Authorize contract deletion?</DialogTitle>
             <DialogDescription>
-              This will permanently delete{" "}
-              <strong>{deleteTarget?.title || "this contract"}</strong>. This
-              action cannot be undone.
+              This permanently removes the contract, approval decisions, and attached Drive files.
+              Existing audit records and this deletion reason will be retained. This cannot be undone.
             </DialogDescription>
           </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="deletion-reason">Reason (at least 10 characters)</Label>
+              <Textarea
+                id="deletion-reason"
+                value={deletionReason}
+                onChange={(event) => setDeletionReason(event.target.value)}
+                maxLength={1000}
+                required
+              />
+            </div>
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={deletionConfirmed}
+                onChange={(event) => setDeletionConfirmed(event.target.checked)}
+                className="mt-1"
+              />
+              I confirm I am authorized to approve this deletion.
+            </label>
+          </div>
           <DialogFooter>
-            <DialogClose render={<Button variant="outline" />}>
+            <DialogClose render={<Button variant="outline" disabled={isDeleting} />}>
               Cancel
             </DialogClose>
             <Button
               type="button"
               variant="destructive"
-              disabled={isDeleting}
+              disabled={
+                isDeleting ||
+                deletionReason.trim().length < 10 ||
+                !deletionConfirmed
+              }
               onClick={() => void confirmDelete()}
             >
-              {isDeleting ? "Deleting..." : "Delete draft"}
+              {isDeleting ? "Deleting..." : "Approve and delete"}
             </Button>
           </DialogFooter>
         </DialogContent>

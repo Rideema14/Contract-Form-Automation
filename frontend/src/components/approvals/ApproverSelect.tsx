@@ -14,7 +14,6 @@ import {
   Loader2,
   AlertCircle,
   RotateCcw,
-  UserCheck,
 } from 'lucide-react';
 
 export interface ApproverSelectProps {
@@ -34,15 +33,6 @@ export interface ApproverSelectProps {
   className?: string;
 }
 
-function areArraysEqual(a: string[], b: string[]): boolean {
-  if (a === b) return true;
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
-}
-
 export function ApproverSelect({
   value,
   defaultValue,
@@ -57,22 +47,14 @@ export function ApproverSelect({
   const [error, setError] = useState<string | null>(null);
 
   // Selected approver IDs in sequence
-  const [selectedIds, setSelectedIds] = useState<string[]>(() => {
-    return value ?? defaultValue ?? [];
-  });
+  const [uncontrolledIds, setUncontrolledIds] = useState<string[]>(defaultValue ?? []);
+  const selectedIds = value ?? uncontrolledIds;
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isOpen, setIsOpen] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  // Sync internal selectedIds with controlled prop value safely without triggering loops
-  useEffect(() => {
-    if (value !== undefined) {
-      setSelectedIds((prev) => (areArraysEqual(prev, value) ? prev : value));
-    }
-  }, [value]);
 
   // Fetch approvers from backend
   const fetchApprovers = useCallback(async () => {
@@ -90,7 +72,11 @@ export function ApproverSelect({
   }, []);
 
   useEffect(() => {
-    fetchApprovers();
+    const timeoutId = window.setTimeout(() => {
+      void fetchApprovers();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [fetchApprovers]);
 
   // Close dropdown when clicking outside
@@ -134,7 +120,9 @@ export function ApproverSelect({
   }, [approvers, selectedIds, searchQuery]);
 
   const updateSelection = (nextIds: string[]) => {
-    setSelectedIds(nextIds);
+    if (value === undefined) {
+      setUncontrolledIds(nextIds);
+    }
     onChange?.(nextIds);
   };
 

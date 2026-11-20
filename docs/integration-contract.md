@@ -1,11 +1,12 @@
 # Contract Forms Automation Integration Contract
 
-> **P0 integration-planning deliverable**
+> **P0 integration-planning deliverable (historical)**
 >
 > This document is the consolidated contract for the Contract Management, Approval
 > Workflow and Document Management modules. It separates confirmed requirements,
 > proposed technical decisions and items that still require company confirmation.
-> It does not imply that the planned endpoints or schema have been implemented.
+> It predates the current implementation; use `09-google-drive-integration.md` and
+> `10-pdf-generation.md` for current document/PDF behavior.
 
 ## 0. Baseline and decisions
 
@@ -14,9 +15,8 @@
 - The backend is the security boundary. Frontend role checks are convenience only.
 - PostgreSQL is the structured-data source of truth; Prisma remains pinned at
   **6.19.3**.
-- The implemented database currently contains only `User` and the existing
-  `UserRole` enum. The initial migration is a connectivity smoke test, not the
-  final application schema.
+- At the time this planning contract was authored, the database contained only
+  `User` and the existing `UserRole` enum. The current schema has since expanded.
 - Vendors do not authenticate or receive application accounts.
 - File bytes remain in a private Google Drive. PostgreSQL stores metadata and the
   Drive file ID only.
@@ -31,7 +31,7 @@
 | `Attachment` versus `Document` | Use **Attachment** for the database entity and API resource. | The planned database schema and requested P0 entity use `Attachment`; “document” remains a generic description and a file category is not a second entity. |
 | `ApprovalStep`/`ApprovalDecision` versus `approvals`/`approval_history` | Use `ApprovalStep` for the ordered current workflow record and `ApprovalDecision` for its append-only decision history. | This matches the requested P0 entities and removes the ambiguity between a step and an event. |
 | `UserRole` enum versus `Role` table | Preserve the implemented `UserRole` enum (`ADMIN`, `SUBMITTER`, `APPROVER`); do not add a `Role` table. | It is already implemented, explicitly protected by project rules, and no documented need for dynamic roles exists. |
-| PDFMake versus Puppeteer | Use **PDFMake inside Express**. | The project objective and README identify PDFMake as the required implementation. The older architecture/PDF notes mentioning Puppeteer are superseded for this contract; no HTML browser renderer is required. |
+| PDFMake versus Puppeteer | Use **PDFMake inside Express**. | The project objective and README identify PDFMake as the required implementation; no HTML browser renderer is required. |
 | Contract status naming | Use `DRAFT`, `PENDING_APPROVAL`, `RETURNED`, `APPROVED`, `REJECTED`. | These values are already used by the database and workflow documentation and clearly distinguish a returned form from a rejected terminal form. |
 | Approval comment requirements | Comments are required for `RETURN` and `REJECT`; optional for `APPROVE` until the company confirms otherwise. | This is the explicit workflow rule and preserves the documented “approve optional” behavior. |
 | Proposed fields versus implemented fields | Treat all entities other than `User` and all new `User` relations as proposed. | The current Prisma schema and migration contain no contract, approval, vendor or attachment implementation. |
@@ -53,9 +53,9 @@ finalize validation, migrations or UI behavior:
 - **CL-11:** supported currencies and exchange-rate requirements.
 - **CL-12:** evaluation criteria, scoring scale and weighting.
 - **CL-13:** Excel columns and whether rows are parsed.
-- **CL-14:** file allow-list, size limits and retention.
-- **CL-16:** Google account type, ownership and access model.
-- **CL-18:** deletion/archive and retention policy.
+- **CL-14:** Resolved; see `02-requirements.md` and `.env.example`.
+- **CL-16:** Resolved as personal My Drive OAuth with `drive.file` and an app-created root.
+- **CL-18:** Resolved; no automatic deletion and Admin deletion is audited.
 - **CL-19:** vendor master ownership and creation permissions.
 - **CL-20:** password versus company SSO authentication.
 

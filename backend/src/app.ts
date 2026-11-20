@@ -11,6 +11,7 @@ import referenceDataRoutes from "./routes/reference-data.routes";
 import approvalsRoutes from "./routes/approvals.routes";
 import usersRoutes from "./routes/users.routes";
 import notificationsRoutes from "./routes/notifications.routes";
+import dashboardRoutes from "./routes/dashboard.routes";
 import authRoutes from "./modules/auth/auth.routes";
 import attachmentsRoutes from "./routes/attachments.routes";
 import { AppError } from "./utils/app-error";
@@ -38,6 +39,7 @@ app.use("/api/forms", contractsRoutes);
 app.use("/api/forms", attachmentsRoutes);
 app.use("/api/reference-data", referenceDataRoutes);
 app.use("/api/approvals", approvalsRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 app.use(notFoundHandler);
 
 app.use((err: unknown, req: express.Request, res: express.Response,

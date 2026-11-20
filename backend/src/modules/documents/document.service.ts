@@ -26,6 +26,25 @@ export interface DocumentServiceDeps {
 
 const EXCEL_EXTENSIONS = ['xls', 'xlsx'];
 
+function reportCleanupFailure(
+  operation: string,
+  originalError: unknown,
+  cleanupErrors: unknown[],
+  driveFileIds: string[]
+): AppError {
+  console.error('Private document cleanup failed', {
+    operation,
+    originalError,
+    cleanupErrors,
+    driveFileIds,
+  });
+  return new AppError(
+    500,
+    'DOCUMENT_CLEANUP_FAILED',
+    'The document operation failed and storage cleanup was incomplete. Contact an administrator.'
+  );
+}
+
 export class DocumentService {
   constructor(private readonly deps: DocumentServiceDeps) {}
 
@@ -56,6 +75,7 @@ export class DocumentService {
 
     const existing = (await repository.listByContract(input.contractFormId)).map((r) => r.fileName);
     const created: AttachmentRecord[] = [];
+    const driveFileIds: string[] = [];
 
     try {
       for (const file of input.files) {
@@ -66,29 +86,40 @@ export class DocumentService {
           name: fileName,
           mimeType: file.mimetype,
           body: createReadStream(file.path),
+          contractFormId: input.contractFormId,
         });
-        try {
-          created.push(
-            await repository.create({
-              contractFormId: input.contractFormId,
-              category: input.category,
-              fileName,
-              mimeType: file.mimetype,
-              sizeBytes: file.size,
-              driveFileId,
-              uploadedById: input.uploadedById,
-            })
-          );
-        } catch (error) {
-          await drive.remove(driveFileId).catch(() => undefined);
-          throw error;
-        }
+        driveFileIds.push(driveFileId);
+        created.push(
+          await repository.create({
+            contractFormId: input.contractFormId,
+            category: input.category,
+            fileName,
+            mimeType: file.mimetype,
+            sizeBytes: file.size,
+            driveFileId,
+            uploadedById: input.uploadedById,
+          })
+        );
       }
       return created;
     } catch (error) {
+      const cleanupErrors: unknown[] = [];
+      for (const driveFileId of driveFileIds) {
+        try {
+          await drive.remove(driveFileId);
+        } catch (cleanupError) {
+          cleanupErrors.push(cleanupError);
+        }
+      }
       for (const record of created) {
-        await drive.remove(record.driveFileId).catch(() => undefined);
-        await repository.delete(record.id).catch(() => undefined);
+        try {
+          await repository.delete(record.id);
+        } catch (cleanupError) {
+          cleanupErrors.push(cleanupError);
+        }
+      }
+      if (cleanupErrors.length > 0) {
+        throw reportCleanupFailure('upload rollback', error, cleanupErrors, driveFileIds);
       }
       throw error;
     }
@@ -96,6 +127,32 @@ export class DocumentService {
 
   list(contractFormId: string): Promise<AttachmentRecord[]> {
     return this.deps.repository.listByContract(contractFormId);
+  }
+
+  async deleteFilesForContract(contractFormId: string): Promise<void> {
+    const records = await this.deps.repository.listByContract(contractFormId);
+    const failures: unknown[] = [];
+
+    for (const record of records) {
+      try {
+        await this.deps.drive.remove(record.driveFileId);
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+
+    if (failures.length > 0) {
+      console.error('Contract attachment deletion failed', {
+        contractFormId,
+        driveFileIds: records.map((record) => record.driveFileId),
+        failures,
+      });
+      throw new AppError(
+        502,
+        'DRIVE_DELETE_FAILED',
+        'Some contract files could not be removed. The contract records were preserved; an administrator can retry.'
+      );
+    }
   }
 
   async findByCategory(
@@ -134,6 +191,7 @@ export class DocumentService {
       name: fileName,
       mimeType: input.mimeType,
       body: Readable.from(input.content),
+      contractFormId: input.contractFormId,
     });
     try {
       return await repository.create({
@@ -146,7 +204,11 @@ export class DocumentService {
         uploadedById: input.uploadedById,
       });
     } catch (error) {
-      await drive.remove(driveFileId).catch(() => undefined);
+      try {
+        await drive.remove(driveFileId);
+      } catch (cleanupError) {
+        throw reportCleanupFailure('generated file rollback', error, [cleanupError], [driveFileId]);
+      }
       throw error;
     }
   }

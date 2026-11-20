@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -77,12 +77,78 @@ describe('DocumentService', () => {
     expect(drive.files.size).toBe(0);
   });
 
+  it('reports incomplete cleanup instead of hiding orphaned private files', async () => {
+    const drive = new FakeDrive();
+    drive.remove = async () => {
+      throw new Error('drive cleanup down');
+    };
+    const repo: AttachmentRepository = {
+      ...new InMemoryAttachmentRepository(),
+      listByContract: async () => [],
+      create: async () => {
+        throw new Error('db down');
+      },
+      findById: async () => null,
+      delete: async () => undefined,
+    };
+    const svc = new DocumentService({ drive, repository: repo });
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await expect(
+      svc.uploadAttachments({ ...base, files: [await tempFile('a.pdf')] })
+    ).rejects.toMatchObject({
+      statusCode: 500,
+      code: 'DOCUMENT_CLEANUP_FAILED',
+    });
+    expect(drive.files.size).toBe(1);
+    expect(errorLog).toHaveBeenCalledOnce();
+  });
+
   it('opens only attachments that belong to the contract', async () => {
     const repo = new InMemoryAttachmentRepository();
     const svc = new DocumentService({ drive: new FakeDrive(), repository: repo });
     const [rec] = await svc.uploadAttachments({ ...base, files: [await tempFile('a.pdf')] });
     await expect(svc.openAttachment('other', rec.id)).rejects.toBeInstanceOf(AppError);
     expect((await svc.openAttachment('c1', rec.id)).record.id).toBe(rec.id);
+  });
+
+  it('removes all Drive files for an Admin-approved deletion before database cleanup', async () => {
+    const drive = new FakeDrive();
+    const repo = new InMemoryAttachmentRepository();
+    const svc = new DocumentService({ drive, repository: repo });
+    const [first, second] = await svc.uploadAttachments({
+      ...base,
+      files: [await tempFile('first.pdf'), await tempFile('second.pdf')],
+    });
+
+    await svc.deleteFilesForContract('c1');
+
+    expect(drive.files.size).toBe(0);
+    expect(await repo.listByContract('c1')).toHaveLength(2);
+    expect([first.driveFileId, second.driveFileId]).toEqual(['d1', 'd2']);
+  });
+
+  it('preserves metadata and reports Drive cleanup failures for retry', async () => {
+    const drive = new FakeDrive();
+    const repo = new InMemoryAttachmentRepository();
+    const svc = new DocumentService({ drive, repository: repo });
+    const records = await svc.uploadAttachments({
+      ...base,
+      files: [await tempFile('first.pdf'), await tempFile('second.pdf')],
+    });
+    const remove = drive.remove.bind(drive);
+    drive.remove = async (id: string) => {
+      if (id === records[0].driveFileId) throw new Error('temporary Drive failure');
+      await remove(id);
+    };
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await expect(svc.deleteFilesForContract('c1')).rejects.toMatchObject({
+      statusCode: 502,
+      code: 'DRIVE_DELETE_FAILED',
+    });
+    expect(await repo.listByContract('c1')).toHaveLength(2);
+    expect(drive.files.size).toBe(1);
   });
 
   it('rejects non-Excel files in the COST_ESTIMATE_EXCEL category before storing anything', async () => {

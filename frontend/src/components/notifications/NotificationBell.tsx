@@ -44,7 +44,11 @@ export function NotificationBell() {
 
   // Initial fetch on mount
   useEffect(() => {
-    fetchNotifications();
+    const timeoutId = window.setTimeout(() => {
+      void fetchNotifications();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [fetchNotifications]);
 
   // Close on outside click

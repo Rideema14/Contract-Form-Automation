@@ -15,7 +15,5 @@ export interface NotificationItem {
 }
 
 export interface NotificationsResponse {
-  data: any;
-  meta: any;
   items: NotificationItem[];
 }

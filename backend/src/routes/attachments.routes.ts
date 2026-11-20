@@ -24,6 +24,32 @@ import {
 
 const router = Router();
 
+router.get(
+  '/:formId/attachments/config',
+  authenticate,
+  async (req, res, next) => {
+    try {
+      const formId = Array.isArray(req.params.formId) ? req.params.formId[0] : req.params.formId;
+      if (!req.authUser) {
+        throw new AppError(401, 'AUTHENTICATION_REQUIRED', 'Authentication required');
+      }
+      await contractService.assertCanViewAttachments(formId, req.authUser as never);
+      const config = loadDocumentUploadConfig();
+      res.status(200).json({
+        success: true,
+        message: 'Attachment upload configuration retrieved',
+        data: {
+          allowedExtensions: config.allowedExtensions,
+          maxFileSizeBytes: config.maxFileSizeBytes,
+          maxFileCount: config.maxFileCount,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
 /**
  * Load production upload policy from environment variables.
  * Missing configuration fails closed; it does not silently use test limits.

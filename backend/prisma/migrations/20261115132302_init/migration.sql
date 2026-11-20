@@ -1,0 +1,2 @@
+-- No-op retained migration directory.
+-- The superseded schema from this period is already represented by the later current-schema migrations.

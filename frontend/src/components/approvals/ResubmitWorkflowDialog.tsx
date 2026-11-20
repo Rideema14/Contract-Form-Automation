@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -38,14 +38,6 @@ export function ResubmitWorkflowDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Sync existing approver IDs when dialog opens or existingApproverIds change
-  useEffect(() => {
-    if (isOpen) {
-      setApproverIds(existingApproverIds);
-      setErrorMessage(null);
-    }
-  }, [isOpen, existingApproverIds]);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
@@ -79,7 +71,10 @@ export function ResubmitWorkflowDialog({
   };
 
   const handleOpenChange = (open: boolean) => {
-    if (!open && !isSubmitting) {
+    if (open) {
+      setApproverIds(existingApproverIds);
+      setErrorMessage(null);
+    } else if (!isSubmitting) {
       setErrorMessage(null);
       onClose();
     }
