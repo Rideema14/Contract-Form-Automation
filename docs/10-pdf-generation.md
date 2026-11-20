@@ -33,6 +33,10 @@ The Admin-only `POST /api/forms/:formId/final-pdf` endpoint can retry or retriev
 - PDF builder: `backend/src/modules/documents/pdf.service.ts`.
 - Approved-only, idempotent storage: `backend/src/modules/documents/final-pdf.service.ts`.
 - Final PDF is stored as a `GENERATED_PDF` attachment; its Drive file ID is never exposed to the client.
+- The contract detail page at `/contracts/:contractId` uses the shared frontend API client for upload, listing, and Admin-only final-PDF generation.
+- Attachments are retrieved through authenticated `GET /api/forms/:formId/attachments/:attachmentId/view` and `/download` routes. PDF previews use temporary browser object URLs that are revoked when the preview closes.
+- Upload limits come from authenticated `GET /api/forms/:formId/attachments/config`; uploads are available to the contract creator only while the form is `DRAFT` or `RETURNED`. The backend remains authoritative for all access checks.
+- After successful upload or final-PDF generation, the contract detail page refreshes its attachment list so the stored document can be viewed and downloaded.
 - Page size, exact labels, branding, and layout matching: **pending the company sample PDF**.
 
 ## Remaining Acceptance

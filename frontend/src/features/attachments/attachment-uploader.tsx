@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { uploadAttachments } from "./attachments-api";
 import type { Attachment, UploadableCategory, UploadLimits } from "./types";
@@ -36,6 +37,7 @@ export function AttachmentUploader({ formId, limits, onUploaded }: AttachmentUpl
   const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   async function submit() {
     const problem = checkFiles(files, category, limits);
@@ -46,8 +48,15 @@ export function AttachmentUploader({ formId, limits, onUploaded }: AttachmentUpl
     setBusy(true);
     setError(null);
     try {
-      onUploaded?.(await uploadAttachments(formId, category, files));
+      const uploaded = await uploadAttachments(formId, category, files);
+      onUploaded?.(uploaded);
       setFiles([]);
+      if (fileInput.current) fileInput.current.value = "";
+      toast.success(
+        uploaded.length === 1
+          ? "Attachment uploaded."
+          : `${uploaded.length} attachments uploaded.`,
+      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Upload failed");
     } finally {
@@ -61,7 +70,11 @@ export function AttachmentUploader({ formId, limits, onUploaded }: AttachmentUpl
         aria-label="Attachment category"
         className="h-8 rounded-lg border border-border bg-background px-2 text-sm"
         value={category}
-        onChange={(event) => setCategory(event.target.value as UploadableCategory)}
+        onChange={(event) => {
+          const nextCategory = event.target.value as UploadableCategory;
+          setCategory(nextCategory);
+          setError(files.length ? checkFiles(files, nextCategory, limits) : null);
+        }}
         disabled={busy}
       >
         {CATEGORIES.map((item) => (
@@ -74,10 +87,20 @@ export function AttachmentUploader({ formId, limits, onUploaded }: AttachmentUpl
         type="file"
         multiple
         aria-label="Files to upload"
+        ref={fileInput}
         accept={limits.allowedExtensions.map((extension) => `.${extension}`).join(",")}
         disabled={busy}
-        onChange={(event) => setFiles(Array.from(event.target.files ?? []))}
+        onChange={(event) => {
+          const selected = Array.from(event.target.files ?? []);
+          setFiles(selected);
+          setError(selected.length ? checkFiles(selected, category, limits) : null);
+        }}
       />
+      {files.length ? (
+        <p className="text-sm text-muted-foreground">
+          {files.length} file{files.length === 1 ? "" : "s"} selected
+        </p>
+      ) : null}
       <Button type="button" onClick={submit} disabled={busy || files.length === 0}>
         {busy ? "Uploading..." : "Upload"}
       </Button>

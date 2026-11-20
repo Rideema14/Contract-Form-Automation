@@ -4,8 +4,11 @@
 Web application that digitizes contract approval forms: create a request, add bidders and cost rows,
 attach supporting documents (private Google Drive), route it through approval, and generate the final PDF.
 
-**Status:** local project foundation only. Business modules (auth, contracts, approvals, Drive, PDF,
-dashboard) are placeholders. Azure is not created yet. Planned files are placeholders, not completed features.
+**Status:** Core application modules (auth, contracts, approvals, document management, Drive integration,
+PDF generation, and dashboard) are implemented on `develop`. Use the
+[team pull-and-test guide](docs/team-pull-and-test-guide.md) to update and validate a local setup.
+Google Drive credentials and live verification, PDF layout approval against the company sample, and
+Azure deployment remain pending.
 
 ## Stack
 Next.js (App Router) + React + TypeScript + Tailwind + shadcn/ui | Express + TypeScript | PostgreSQL + Prisma |

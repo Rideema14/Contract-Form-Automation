@@ -47,6 +47,25 @@ function isApiErrorResponse(value: unknown): value is ApiErrorResponse {
   );
 }
 
+function isFormDataBody(value: unknown): value is FormData {
+  return typeof FormData !== "undefined" && value instanceof FormData;
+}
+
+function toApiError(response: Response, payload: unknown): ApiError {
+  const errorResponse: ApiErrorResponse = isApiErrorResponse(payload)
+    ? payload
+    : {
+        success: false,
+        message: `API request failed: ${response.status}`,
+        error: {
+          code: "HTTP_ERROR",
+          details: [],
+        },
+      };
+
+  return new ApiError(errorResponse, response.status);
+}
+
 export async function apiRequest<T>(
   path: string,
   options: RequestOptions = {},
@@ -78,8 +97,15 @@ async function requestPayload(
   options: RequestOptions,
 ): Promise<unknown> {
   const headers = new Headers(options.headers);
+  const isFormData = isFormDataBody(options.body);
+  const body: BodyInit | undefined =
+    options.body === undefined
+      ? undefined
+      : isFormDataBody(options.body)
+        ? options.body
+        : JSON.stringify(options.body);
 
-  if (options.body !== undefined && !headers.has("Content-Type")) {
+  if (options.body !== undefined && !isFormData && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 
@@ -87,31 +113,32 @@ async function requestPayload(
     ...options,
     credentials: "include",
     headers,
-    body:
-      options.body === undefined
-        ? undefined
-        : JSON.stringify(options.body),
+    body,
     cache: "no-store",
   });
 
   const payload: unknown = await response.json().catch(() => undefined);
 
   if (!response.ok || isApiErrorResponse(payload)) {
-    const errorResponse: ApiErrorResponse = isApiErrorResponse(payload)
-      ? payload
-      : {
-          success: false,
-          message: `API request failed: ${response.status}`,
-          error: {
-            code: "HTTP_ERROR",
-            details: [],
-          },
-        };
-
-    throw new ApiError(errorResponse, response.status);
+    throw toApiError(response, payload);
   }
 
   return payload;
+}
+
+export async function apiGetBlob(path: string): Promise<Blob> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => undefined);
+    throw toApiError(response, payload);
+  }
+
+  return response.blob();
 }
 
 export function apiGet<T>(path: string): Promise<T> {

@@ -182,5 +182,25 @@ describe('attachments router', () => {
     expect(ok.status).toBe(200);
     expect(ok.body.data.category).toBe('GENERATED_PDF');
     expect(pdfCalls).toEqual([FORM]);
+
+    const admin = { 'x-user': 'admin:ADMIN' };
+    const list = await request(a).get(`/api/forms/${FORM}/attachments`).set(admin);
+    expect(list.body.data).toHaveLength(1);
+    expect(list.body.data[0].id).toBe(ok.body.data.id);
+
+    const view = await request(a)
+      .get(`/api/forms/${FORM}/attachments/${ok.body.data.id}/view`)
+      .set(admin)
+      .buffer(true);
+    expect(view.status).toBe(200);
+    expect(view.headers['content-disposition']).toContain('inline');
+
+    const download = await request(a)
+      .get(`/api/forms/${FORM}/attachments/${ok.body.data.id}/download`)
+      .set(admin)
+      .buffer(true);
+    expect(download.status).toBe(200);
+    expect(download.headers['content-disposition']).toContain('attachment');
+    expect(download.body.toString()).toBe('%PDF-x');
   });
 });
