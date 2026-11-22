@@ -179,4 +179,25 @@ describe('createGoogleDriveStorage', () => {
       })
     ).rejects.toBeInstanceOf(DriveError);
   });
+
+  it('reports the Drive HTTP status without including provider error details', async () => {
+    const { drive } = fakeDrive({
+      create: vi.fn().mockRejectedValue({
+        response: { status: 403, data: { error: 'private credential marker' } },
+      }),
+    });
+    const storage = createGoogleDriveStorage({ drive, folderId: 'f', authMode: 'service-account' });
+
+    await expect(
+      storage.upload({
+        name: 'a.pdf',
+        mimeType: 'application/pdf',
+        body: Readable.from(['x']),
+        contractFormId: 'form-1',
+      })
+    ).rejects.toMatchObject({
+      name: 'DriveError',
+      message: 'Failed to upload file to Google Drive (Google Drive returned HTTP 403)',
+    });
+  });
 });

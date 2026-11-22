@@ -7,6 +7,7 @@ import { apiGet, ApiError } from "@/lib/api-client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
+import { NewContractLink } from "@/components/contracts/NewContractLink";
 import type { Contract } from "@/types/contracts";
 
 type DashboardResponse = {
@@ -52,7 +53,7 @@ export default function DashboardPage() {
             <h1 className="text-3xl font-bold">Dashboard</h1>
             <p className="text-muted-foreground">Contract form overview</p>
           </div>
-          <Link href="/contracts/new" className={buttonVariants()}><FileText />New contract</Link>
+          <NewContractLink className={buttonVariants()}><FileText />New contract</NewContractLink>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
@@ -68,7 +69,7 @@ export default function DashboardPage() {
           <CardHeader><CardTitle>Recent contracts</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             {data.recent.length === 0 ? <p className="text-sm text-muted-foreground">No contract forms yet.</p> : data.recent.map((contract) => (
-              <Link key={contract.id} href={`/contracts/${contract.id}`} className="flex items-center justify-between rounded-lg border p-3 hover:bg-muted/40">
+              <Link key={contract.id} href={`/contracts/${contract.id}?return=${encodeURIComponent("/dashboard")}`} className="flex flex-col gap-3 rounded-lg border p-3 hover:bg-muted/40 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="font-medium">{contract.title || "Untitled contract"}</p>
                   <p className="text-xs text-muted-foreground">{contract.referenceNo || "No reference number"} · {contract.createdBy?.fullName || "Unknown creator"}</p>

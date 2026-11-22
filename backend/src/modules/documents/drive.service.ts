@@ -14,10 +14,30 @@ export interface DriveStorage {
 }
 
 export class DriveError extends Error {
-  constructor(message: string, public readonly cause?: unknown) {
+  constructor(message: string) {
     super(message);
     this.name = 'DriveError';
   }
+}
+
+function googleStatus(error: unknown): number | undefined {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'response' in error &&
+    typeof error.response === 'object' &&
+    error.response !== null &&
+    'status' in error.response &&
+    typeof error.response.status === 'number'
+  ) {
+    return error.response.status;
+  }
+  return undefined;
+}
+
+function operationError(message: string, error: unknown): DriveError {
+  const status = googleStatus(error);
+  return new DriveError(status ? `${message} (Google Drive returned HTTP ${status})` : message);
 }
 
 export interface GoogleDriveOptions {
@@ -188,7 +208,7 @@ export function createGoogleDriveStorage(options: GoogleDriveOptions = {}): Driv
         if (!res.data.id) throw new Error('Drive returned no file id');
         return { driveFileId: res.data.id };
       } catch (error) {
-        throw new DriveError('Failed to upload file to Google Drive', error);
+        throw operationError('Failed to upload file to Google Drive', error);
       }
     },
 
@@ -200,7 +220,7 @@ export function createGoogleDriveStorage(options: GoogleDriveOptions = {}): Driv
         );
         return res.data as unknown as Readable;
       } catch (error) {
-        throw new DriveError('Failed to download file from Google Drive', error);
+        throw operationError('Failed to download file from Google Drive', error);
       }
     },
 
@@ -220,7 +240,7 @@ export function createGoogleDriveStorage(options: GoogleDriveOptions = {}): Driv
         ) {
           return;
         }
-        throw new DriveError('Failed to delete file from Google Drive', error);
+        throw operationError('Failed to delete file from Google Drive', error);
       }
     },
   };

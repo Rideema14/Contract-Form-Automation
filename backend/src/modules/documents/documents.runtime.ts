@@ -47,6 +47,10 @@ export function generateAndStoreFinalPdf(formId: string, actor: FinalPdfActor) {
   return finalPdfService.generateAndStoreFinalPdf(formId, actor);
 }
 
+export function generateFinalPdfPackage(formId: string, actor: FinalPdfActor) {
+  return finalPdfService.generatePackage(formId, actor);
+}
+
 export function deleteContractAttachments(formId: string) {
   return documentService.deleteFilesForContract(formId);
 }

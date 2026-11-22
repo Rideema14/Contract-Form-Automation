@@ -20,6 +20,14 @@ Rules: use Decimal/Numeric for money (never floats); add constraints and indexes
 contract number, status, created date and common search filters. Agree relationships, required fields,
 delete rules and status enums first.
 
+## Versioned Form Builder
+- `FormSchemaVersion` stores immutable published definitions with unique, increasing version numbers.
+- `FormSchemaDraft` stores the editable Admin draft separately from published definitions.
+- Each `ContractForm` is linked to its original `FormSchemaVersion` and stores custom field values in
+  `dynamicValues`. The additive migration assigns existing contracts and drafts to an empty legacy
+  version; subsequent publications do not alter those records or their values.
+- Contract-to-version deletion is restricted, and no API updates or deletes published versions.
+
 ## Migration workflow
 - Local: `npx prisma migrate dev --name descriptive_change` (from `backend/`)
 - Commit `schema.prisma` and `prisma/migrations/`

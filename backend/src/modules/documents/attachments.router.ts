@@ -5,6 +5,7 @@ import { AppError } from '../../utils/app-error';
 import { sendSuccess } from '../../utils/response';
 import { AttachmentRecord, USER_UPLOAD_CATEGORIES } from './attachment.types';
 import { DocumentService } from './document.service';
+import { FinalPdfPackage } from './final-pdf.service';
 
 export interface AccessUser {
   id: string;
@@ -20,13 +21,22 @@ export interface AttachmentsRouterDeps {
   assertCanView(formId: string, user: AccessUser): Promise<void>;
   /** configured Multer middleware (field "files"). */
   upload: RequestHandler;
-  /** Optional: generate the final PDF on demand (ADMIN only). */
-  ensureFinalPdf?(formId: string, user: AccessUser): Promise<AttachmentRecord>;
+  /** Optional: generate and return the approved contract package. */
+  generatePackage?(formId: string, user: AccessUser): Promise<FinalPdfPackage>;
 }
 
 const formParams = z.object({ formId: z.string().uuid() }).strict();
 const attachmentParams = z.object({ formId: z.string().uuid(), attachmentId: z.string().uuid() }).strict();
-const uploadBody = z.object({ category: z.enum(USER_UPLOAD_CATEGORIES) });
+const uploadBody = z.object({
+  category: z.enum(USER_UPLOAD_CATEGORIES),
+  displayNames: z.union([z.string(), z.array(z.string())]).optional(),
+});
+const displayName = z
+  .string()
+  .trim()
+  .min(1, 'Display name cannot be blank')
+  .max(255, 'Display name cannot exceed 255 characters')
+  .refine((value) => !/[\u0000-\u001f\u007f]/u.test(value), 'Display name cannot contain control characters');
 
 const INLINE_TYPES = new Set(['application/pdf', 'image/png', 'image/jpeg']);
 
@@ -37,6 +47,8 @@ export function toPublicAttachment(r: AttachmentRecord) {
     contractFormId: r.contractFormId,
     category: r.category,
     fileName: r.fileName,
+    originalFileName: r.originalFileName ?? r.fileName,
+    displayName: r.displayName ?? r.fileName,
     mimeType: r.mimeType,
     sizeBytes: r.sizeBytes,
     uploadedById: r.uploadedById,
@@ -62,11 +74,11 @@ function contentDisposition(type: 'attachment' | 'inline', fileName: string): st
 
 /**
  * Routes (mounted under /api/forms):
- *   POST /:formId/attachments                       multipart: files + category
+ *   POST /:formId/attachments                       multipart: files + category + repeated displayNames
  *   GET  /:formId/attachments
  *   GET  /:formId/attachments/:attachmentId/download
  *   GET  /:formId/attachments/:attachmentId/view
- *   POST /:formId/final-pdf                          ADMIN only, idempotent
+ *   POST /:formId/final-pdf                          ADMIN or assigned APPROVER
  */
 export function createAttachmentsRouter(deps: AttachmentsRouterDeps): Router {
   const { service, authenticate, assertCanUpload, assertCanView, upload } = deps;
@@ -91,12 +103,30 @@ export function createAttachmentsRouter(deps: AttachmentsRouterDeps): Router {
     guard(assertCanUpload),
     upload,
     async (req: Request, res: Response) => {
-      const { category } = parse(uploadBody, req.body ?? {}, 'Invalid attachment category');
+      const { category, displayNames: submittedNames } = parse(uploadBody, req.body ?? {}, 'Invalid attachment metadata');
+      const files = Array.isArray(req.files) ? req.files : [];
+      const rawNames = submittedNames === undefined
+        ? files.map((file) => file.originalname)
+        : Array.isArray(submittedNames)
+          ? submittedNames
+          : [submittedNames];
+      const parsedNames = z.array(displayName).safeParse(rawNames);
+      if (!parsedNames.success || parsedNames.data.length !== files.length) {
+        throw new AppError(
+          400,
+          'VALIDATION_ERROR',
+          'Provide one valid display name for each uploaded file',
+          parsedNames.success
+            ? [{ path: ['displayNames'], message: 'The number of display names must match the number of files' }]
+            : parsedNames.error.issues
+        );
+      }
       const records = await service.uploadAttachments({
         contractFormId: String(req.params.formId),
         category,
         uploadedById: currentUser(req).id,
-        files: Array.isArray(req.files) ? req.files : [],
+        files,
+        displayNames: parsedNames.data,
       });
       sendSuccess(req, res, 201, 'Attachments uploaded', records.map(toPublicAttachment));
     }
@@ -124,13 +154,23 @@ export function createAttachmentsRouter(deps: AttachmentsRouterDeps): Router {
   router.get('/:formId/attachments/:attachmentId/download', authenticate, guard(assertCanView), send('download'));
   router.get('/:formId/attachments/:attachmentId/view', authenticate, guard(assertCanView), send('view'));
 
-  if (deps.ensureFinalPdf) {
-    const ensure = deps.ensureFinalPdf;
+  if (deps.generatePackage) {
+    const generatePackage = deps.generatePackage;
     router.post('/:formId/final-pdf', authenticate, async (req, res) => {
       const user = currentUser(req);
-      if (user.role !== 'ADMIN') throw new AppError(403, 'FORBIDDEN', 'Only administrators can generate the final PDF');
+      if (user.role !== 'ADMIN' && user.role !== 'APPROVER') {
+        throw new AppError(403, 'FORBIDDEN', 'Only administrators and approvers can download the contract package');
+      }
       const { formId } = parse(formParams, req.params, 'Invalid contract form ID');
-      sendSuccess(req, res, 200, 'Final PDF ready', toPublicAttachment(await ensure(formId, user)));
+      await assertCanView(formId, user);
+      const file = await generatePackage(formId, user);
+      res
+        .status(200)
+        .setHeader('Content-Type', 'application/zip')
+        .setHeader('Content-Disposition', contentDisposition('attachment', file.fileName))
+        .setHeader('Content-Length', String(file.content.length))
+        .setHeader('Cache-Control', 'private, no-store')
+        .send(file.content);
     });
   }
 

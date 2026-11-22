@@ -1,17 +1,19 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { useRouter, useParams } from 'next/navigation';
 import { apiGet, ApiError } from '@/lib/api-client';
 import type { ApprovalStepDetail, ApprovalHistoryResponse } from '@/types/approval';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { ApprovalStatusBadge } from '@/components/approvals/ApprovalStatusBadge';
 import { ApprovalHistoryTimeline } from '@/components/approvals/ApprovalHistoryTimeline';
 import { ApprovalActionDialog } from '@/components/approvals/ApprovalActionDialog';
+import { AttachmentList } from '@/features/attachments/attachment-list';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
-import { Loader2, AlertCircle, RotateCcw, ArrowLeft, CheckCircle2, RotateCcw as ReturnIcon, XCircle } from 'lucide-react';
+import { Loader2, AlertCircle, RotateCcw, ArrowLeft, CheckCircle2, Eye, RotateCcw as ReturnIcon, XCircle } from 'lucide-react';
 
 export default function ApprovalDetailPage() {
   const params = useParams<{ approvalId: string }>();
@@ -22,6 +24,7 @@ export default function ApprovalDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionOpen, setActionOpen] = useState(false);
   const [actionType, setActionType] = useState<'APPROVE' | 'RETURN' | 'REJECT'>('APPROVE');
+  const [attachmentRefresh, setAttachmentRefresh] = useState(0);
   const { authUser, loading: authLoading } = useAuth();
 
   const loadData = useCallback(async () => {
@@ -75,6 +78,7 @@ if (refreshedDetail.contractFormId) {
 
   const handleActionSuccess = async () => {
     await refreshData();
+    setAttachmentRefresh((value) => value + 1);
     setActionOpen(false);
   };
 
@@ -144,7 +148,7 @@ if (refreshedDetail.contractFormId) {
 
       {/* Contract & Approval Summary Card */}
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-4 pb-4">
+        <CardHeader className="flex flex-col gap-3 pb-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-1">
             <CardTitle className="text-lg sm:text-xl font-bold">
               {contractForm.title ?? 'Untitled Contract'}
@@ -155,7 +159,16 @@ if (refreshedDetail.contractFormId) {
               </p>
             )}
           </div>
-          <ApprovalStatusBadge status={status} />
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href={`/contracts/${encodeURIComponent(stepDetail.contractFormId)}?view=1&return=${encodeURIComponent(`/approvals/${encodeURIComponent(stepDetail.id)}`)}`}
+              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+            >
+              <Eye className="size-4" />
+              View Form
+            </Link>
+            <ApprovalStatusBadge status={status} />
+          </div>
         </CardHeader>
 
         <CardContent className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 pt-2 text-xs border-t">
@@ -184,6 +197,15 @@ if (refreshedDetail.contractFormId) {
               {actedAt ? new Date(actedAt).toLocaleString() : 'Pending Decision'}
             </span>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Documents and attachments</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <AttachmentList formId={stepDetail.contractFormId} refreshKey={attachmentRefresh} />
         </CardContent>
       </Card>
 

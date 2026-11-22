@@ -23,6 +23,24 @@ export class ApiError extends Error {
   }
 }
 
+function formatApiErrorDetail(detail: unknown): string | null {
+  if (typeof detail !== "object" || detail === null) return null;
+  const value = detail as { path?: unknown; message?: unknown };
+  if (typeof value.message !== "string") return null;
+  const path = Array.isArray(value.path)
+    ? value.path.filter((part): part is string | number => typeof part === "string" || typeof part === "number").join(".")
+    : typeof value.path === "string"
+      ? value.path
+      : "";
+  return path ? `${path}: ${value.message}` : value.message;
+}
+
+export function apiErrorMessage(error: unknown, fallback: string): string {
+  if (!(error instanceof ApiError)) return error instanceof Error ? error.message : fallback;
+  const details = error.details.map(formatApiErrorDetail).filter((detail): detail is string => Boolean(detail));
+  return details.length ? `${error.message}: ${details.join("; ")}` : error.message;
+}
+
 type RequestOptions = Omit<RequestInit, "body"> & {
   body?: unknown;
 };

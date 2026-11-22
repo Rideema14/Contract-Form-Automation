@@ -5,7 +5,13 @@ import { initializeOrResetApprovalWorkflow } from './approval.service';
 import { initializeWorkflowSchema } from '../schemas/approval.schema';
 import { prisma } from '../lib/prisma';
 import { AppError } from '../utils/app-error';
-import { ContractDraftInput } from '../schemas/contract.schema';
+import { ContractDraftInput, CreateContractInput } from '../schemas/contract.schema';
+import { formSchemaDefinitionSchema } from '../schemas/form-builder.schema';
+import {
+  getLatestFormSchema,
+  normalizeDynamicValues,
+  validateDynamicSubmission,
+} from './form-builder.service';
 
 type AuthUser = { id: string; role: UserRole };
 
@@ -185,7 +191,7 @@ async function validateRecommendedVendor(
 
 export async function createDraft(
   user: AuthUser,
-  input: ContractDraftInput
+  input: CreateContractInput
 ) {
   assertAuthenticated(user);
 
@@ -200,22 +206,54 @@ export async function createDraft(
     );
   }
 
-  if (input.recommendedVendorId || input.recommendedBidderId) {
+  const { formSchemaVersionId, dynamicValues, ...contractInput } = input;
+  const latestSchema = await getLatestFormSchema();
+  if (formSchemaVersionId && formSchemaVersionId !== latestSchema.id) {
     throw new AppError(
       409,
-      'INVALID_RECOMMENDED_VENDOR',
-      'Recommended vendor must be added as a bidder before it can be selected'
+      'FORM_SCHEMA_CHANGED',
+      'The contract form configuration changed. Reload the page before creating a contract.'
     );
   }
+  const normalizedValues = normalizeDynamicValues(latestSchema.definition, dynamicValues);
 
-  return prisma.contractForm.create({
-    data: {
-      ...input,
-      contractAmount: decimal(input.contractAmount),
-      createdById: user.id,
-      status: ContractStatus.DRAFT,
-    },
-  });
+  if (input.referenceNo) {
+    const existing = await prisma.contractForm.findUnique({
+      where: { referenceNo: input.referenceNo },
+      select: { id: true },
+    });
+    if (existing) {
+      throw new AppError(
+        409,
+        'DUPLICATE_REFERENCE',
+        'This reference number already exists',
+        [{ path: 'referenceNo', message: 'This reference number already exists' }]
+      );
+    }
+  }
+
+  try {
+    return await prisma.contractForm.create({
+      data: {
+        ...contractInput,
+        formSchemaVersionId: latestSchema.id,
+        dynamicValues: normalizedValues as Prisma.InputJsonValue,
+        contractAmount: decimal(input.contractAmount),
+        createdById: user.id,
+        status: ContractStatus.DRAFT,
+      },
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      throw new AppError(
+        409,
+        'DUPLICATE_REFERENCE',
+        'This reference number already exists',
+        [{ path: 'referenceNo', message: 'This reference number already exists' }]
+      );
+    }
+    throw error;
+  }
 }
 
 export async function listContracts(
@@ -394,6 +432,7 @@ export async function getContract(formId: string, user: AuthUser) {
           decisions: true,
         },
       },
+      formSchemaVersion: true,
       approvalDecisions: true,
       auditLogs: {
         orderBy: { createdAt: 'asc' },
@@ -412,41 +451,95 @@ export async function updateContract(
   user: AuthUser,
   input: ContractDraftInput
 ) {
-  await getEditableForm(formId, user);
+  const form = await getEditableForm(formId, user);
+  const { dynamicValues, ...contractInput } = input;
+  let normalizedInput: Omit<ContractDraftInput, 'dynamicValues'> = { ...contractInput };
+  let normalizedDynamicValues: Prisma.InputJsonValue | undefined;
 
-  if (Object.prototype.hasOwnProperty.call(input, 'recommendedVendorId')) {
-    await validateRecommendedVendor(
-      formId,
-      input.recommendedVendorId
-    );
+  if (Object.prototype.hasOwnProperty.call(input, 'dynamicValues')) {
+    const schema = await prisma.formSchemaVersion.findUnique({
+      where: { id: form.formSchemaVersionId },
+    });
+    if (!schema) {
+      throw new AppError(500, 'INVALID_FORM_SCHEMA', 'The contract form configuration is unavailable.');
+    }
+    normalizedDynamicValues = normalizeDynamicValues(
+      formSchemaDefinitionSchema.parse(schema.definition),
+      { ...jsonObject(form.dynamicValues), ...(dynamicValues ?? {}) },
+    ) as Prisma.InputJsonValue;
   }
 
-  if (input.recommendedBidderId) {
-    const bidder = await prisma.bidder.findFirst({
-      where: {
-        id: input.recommendedBidderId,
-        contractFormId: formId,
-      },
-    });
+  if (Object.prototype.hasOwnProperty.call(input, 'recommendedBidderId')) {
+    if (!input.recommendedBidderId) {
+      normalizedInput.recommendedVendorId = null;
+      normalizedInput.recommendedBidderId = null;
+    } else {
+      const bidder = await prisma.bidder.findFirst({
+        where: {
+          id: input.recommendedBidderId,
+          contractFormId: formId,
+        },
+      });
 
-    if (!bidder) {
+      if (!bidder) {
+        throw new AppError(
+          409,
+          'INVALID_RECOMMENDED_BIDDER',
+          'Recommended bidder must belong to this contract'
+        );
+      }
+
+      normalizedInput.recommendedVendorId = bidder.vendorId;
+    }
+  } else if (Object.prototype.hasOwnProperty.call(input, 'recommendedVendorId')) {
+    if (!input.recommendedVendorId) {
+      normalizedInput.recommendedVendorId = null;
+      normalizedInput.recommendedBidderId = null;
+    } else {
+      await validateRecommendedVendor(formId, input.recommendedVendorId);
+    }
+  }
+
+  if (input.referenceNo) {
+    const existing = await prisma.contractForm.findFirst({
+      where: {
+        referenceNo: input.referenceNo,
+        id: { not: formId },
+      },
+      select: { id: true },
+    });
+    if (existing) {
       throw new AppError(
         409,
-        'INVALID_RECOMMENDED_BIDDER',
-        'Recommended bidder must belong to this contract'
+        'DUPLICATE_REFERENCE',
+        'This reference number already exists',
+        [{ path: 'referenceNo', message: 'This reference number already exists' }]
       );
     }
   }
 
-  return prisma.contractForm.update({
-    where: { id: formId },
-    data: {
-      ...input,
-      ...(Object.prototype.hasOwnProperty.call(input, 'contractAmount')
-        ? { contractAmount: decimal(input.contractAmount) }
-        : {}),
-    },
-  });
+  try {
+    return await prisma.contractForm.update({
+      where: { id: formId },
+      data: {
+        ...normalizedInput,
+        ...(normalizedDynamicValues !== undefined ? { dynamicValues: normalizedDynamicValues } : {}),
+        ...(Object.prototype.hasOwnProperty.call(input, 'contractAmount')
+          ? { contractAmount: decimal(input.contractAmount) }
+          : {}),
+      },
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      throw new AppError(
+        409,
+        'DUPLICATE_REFERENCE',
+        'This reference number already exists',
+        [{ path: 'referenceNo', message: 'This reference number already exists' }]
+      );
+    }
+    throw error;
+  }
 }
 
 export async function listDrafts(user: AuthUser) {
@@ -467,30 +560,48 @@ export async function deleteContract(
   reason: string
 ) {
   assertAuthenticated(user);
-  if (user.role !== UserRole.ADMIN) {
+  if (user.role !== UserRole.ADMIN && user.role !== UserRole.SUBMITTER) {
     throw new AppError(
       403,
       'FORBIDDEN',
-      'Only an administrator may authorize contract deletion'
+      'You are not authorized to delete contracts'
     );
   }
 
-  const form = await prisma.contractForm.findUnique({
-    where: { id: formId },
-    select: { id: true, referenceNo: true, title: true },
-  });
-  if (!form) {
-    throw new AppError(404, 'FORM_NOT_FOUND', 'Contract form not found');
-  }
-
   return prisma.$transaction(async (tx) => {
-    await tx.contractForm.update({
+    const form = await tx.contractForm.findUnique({
       where: { id: formId },
+      select: {
+        id: true,
+        createdById: true,
+        status: true,
+        referenceNo: true,
+        title: true,
+      },
+    });
+    if (!form) {
+      throw new AppError(404, 'FORM_NOT_FOUND', 'Contract form not found');
+    }
+    assertDeletableContract(form, user);
+
+    const claimedDraft = await tx.contractForm.updateMany({
+      where: {
+        id: formId,
+        status: ContractStatus.DRAFT,
+        ...(user.role === UserRole.SUBMITTER ? { createdById: user.id } : {}),
+      },
       data: {
         recommendedBidderId: null,
         recommendedVendorId: null,
       },
     });
+    if (claimedDraft.count !== 1) {
+      throw new AppError(
+        403,
+        'FORBIDDEN',
+        'Only an authorized user may delete this draft contract'
+      );
+    }
 
     const bidders = await tx.bidder.findMany({
       where: { contractFormId: formId },
@@ -536,6 +647,65 @@ export async function deleteContract(
   });
 }
 
+function assertDeletableContract(
+  form: { createdById: string; status: ContractStatus },
+  user: AuthUser
+) {
+  if (form.status !== ContractStatus.DRAFT) {
+    throw new AppError(
+      403,
+      'FORBIDDEN',
+      'Only draft contracts may be deleted'
+    );
+  }
+
+  if (
+    user.role === UserRole.SUBMITTER &&
+    form.createdById !== user.id
+  ) {
+    throw new AppError(
+      403,
+      'FORBIDDEN',
+      'Submitters may delete only their own draft contracts'
+    );
+  }
+}
+
+export async function assertCanDeleteContract(
+  formId: string,
+  user: AuthUser
+) {
+  assertAuthenticated(user);
+  if (user.role !== UserRole.ADMIN && user.role !== UserRole.SUBMITTER) {
+    throw new AppError(
+      403,
+      'FORBIDDEN',
+      'You are not authorized to delete contracts'
+    );
+  }
+
+  const form = await prisma.contractForm.findUnique({
+    where: { id: formId },
+    select: {
+      id: true,
+      createdById: true,
+      status: true,
+      referenceNo: true,
+      title: true,
+    },
+  });
+  if (!form) {
+    throw new AppError(404, 'FORM_NOT_FOUND', 'Contract form not found');
+  }
+  assertDeletableContract(form, user);
+  return form;
+}
+
+function jsonObject(value: Prisma.JsonValue): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value));
+}
+
 async function validateSubmission(formId: string) {
   const form = await prisma.contractForm.findUnique({
     where: { id: formId },
@@ -549,6 +719,7 @@ async function validateSubmission(formId: string) {
       costLines: {
         orderBy: { sortOrder: 'asc' },
       },
+      formSchemaVersion: true,
     },
   });
 
@@ -583,6 +754,15 @@ async function validateSubmission(formId: string) {
       'Validation failed',
       missing
     );
+  }
+
+  const formSchemaDefinition = formSchemaDefinitionSchema.parse(form.formSchemaVersion.definition);
+  const dynamicErrors = validateDynamicSubmission(
+    formSchemaDefinition,
+    normalizeDynamicValues(formSchemaDefinition, form.dynamicValues),
+  );
+  if (dynamicErrors.length) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Dynamic form fields are incomplete or invalid.', dynamicErrors);
   }
 
   assertNonNegative(
@@ -778,7 +958,7 @@ export async function createBidder(
     email?: string | null;
     phone?: string | null;
     qualifications?: string | null;
-    sortOrder: number;
+    sortOrder?: number;
   }
 ) {
   await getEditableForm(formId, user);
@@ -828,10 +1008,17 @@ export async function createBidder(
     );
   }
 
-  return prisma.$transaction(async (tx) =>
-    tx.bidder.create({
+  return prisma.$transaction(async (tx) => {
+    const last = await tx.bidder.aggregate({
+      where: { contractFormId: formId },
+      _max: { sortOrder: true },
+    });
+    const sortOrder = (last._max.sortOrder ?? -1) + 1;
+
+    return tx.bidder.create({
       data: {
         ...input,
+        sortOrder,
         companyName,
         contractFormId: formId,
       },
@@ -839,8 +1026,8 @@ export async function createBidder(
         vendor: true,
         quotations: true,
       },
-    })
-  );
+    });
+  });
 }
 
 export async function updateBidder(

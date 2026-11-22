@@ -19,18 +19,19 @@ export function WorkspaceHeader() {
   const navLinks = [
     { label: 'Dashboard', href: '/dashboard' },
     { label: 'Contracts', href: '/contracts' },
-    { label: 'Approvals', href: '/approvals' },
+    { label: authUser?.role === 'SUBMITTER' ? 'Status' : 'Approvals', href: '/approvals' },
     ...(authUser?.role === 'ADMIN'
       ? [
           { label: 'Users', href: '/admin/users' },
-          { label: 'Reference data', href: '/admin/reference-data' },
+          { label: 'Reference Data Management', href: '/admin/reference-data' },
+          { label: 'Contract Form Builder', href: '/admin/form-builder' },
         ]
       : []),
   ];
 
   return (
     <header className="sticky top-0 z-40 w-full border-b bg-background/95 backdrop-blur supports-backdrop-filter:backdrop-blur">
-      <div className="container mx-auto flex h-14 items-center justify-between px-4 sm:px-6">
+      <div className="container mx-auto flex min-h-14 items-center justify-between gap-2 px-2 sm:px-6">
         {/* Brand & Navigation */}
         <div className="flex items-center gap-6">
           <NextLink href="/dashboard" className="flex items-center gap-2 font-semibold text-sm">
@@ -40,7 +41,7 @@ export function WorkspaceHeader() {
             <span className="hidden sm:inline-block">Contract Forms Automation</span>
           </NextLink>
 
-          <nav className="flex items-center gap-1 sm:gap-2">
+          <nav className="flex max-w-[55vw] items-center gap-1 overflow-x-auto sm:max-w-none sm:gap-2">
             {navLinks.map((link) => {
               const isActive = pathname.startsWith(link.href);
               return (

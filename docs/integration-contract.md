@@ -109,11 +109,11 @@ finalize validation, migrations or UI behavior:
 | `ContractCategory.id` | UUID | Required | Server-generated | ContractCategory | `05-database-design` |
 | `ContractCategory.name` | string | Required | Unique, non-empty | ContractCategory | `05-database-design` |
 | `VendorType.id` | UUID | Required | Server-generated | VendorType | `05-database-design` |
-| `VendorType.name` | string | Required | Unique, non-empty; managed by Admin or other owner **NEEDS CONFIRMATION (CL-19)** | VendorType | `05-database-design` |
+| `VendorType.name` | string | Required | Unique, non-empty; managed by Admin | VendorType | `05-database-design` |
 | `Vendor.id` | UUID | Required | Server-generated | Vendor | `05-database-design` |
 | `Vendor.name` | string | Required | Non-empty | Vendor | `05-database-design` |
 | `Vendor.vendorTypeId` | UUID | Required | Must reference VendorType | Vendor | `05-database-design` |
-| `Vendor.contactDetails` | JSON/object | Optional | Shape and fields **NEEDS CONFIRMATION (CL-09)**; do not expose secrets | Vendor | `05-database-design` |
+| `Vendor.contactDetails` | JSON/object | Optional | Structured `contactPerson`, `email`, `phone`, and `qualifications` text fields; unknown existing keys are preserved | Vendor | `05-database-design` |
 | `Vendor.createdAt` | UTC timestamp | Required | Server-generated | Vendor | `05-database-design` |
 | `Currency.id` | UUID | Required | Server-generated | Currency | `database-schema` |
 | `Currency.code` | string | Required | ISO/code convention and supported list **NEEDS CONFIRMATION (CL-11)** | Currency | `database-schema` |

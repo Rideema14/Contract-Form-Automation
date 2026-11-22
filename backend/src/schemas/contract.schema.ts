@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { dynamicValuesSchema } from './form-builder.schema';
 
 const uuid = z.string().uuid();
 const decimal = z.string().trim().regex(/^\d+(?:\.\d{1,4})?$/, 'Must be a non-negative decimal with up to 4 decimal places');
@@ -18,6 +19,11 @@ export const contractDraftSchema = z.object({
   recommendedVendorId: uuid.optional().nullable(),
   recommendedBidderId: uuid.optional().nullable(),
   selectionRationale: optionalText,
+  dynamicValues: dynamicValuesSchema.optional(),
+}).strict();
+
+export const createContractSchema = contractDraftSchema.extend({
+  formSchemaVersionId: z.string().min(1).max(255).optional(),
 }).strict();
 
 export const contractListQuerySchema = z.object({
@@ -42,7 +48,7 @@ export const bidderSchema = z.object({
   email: z.string().trim().email().max(255).optional().nullable(),
   phone: z.string().trim().max(100).optional().nullable(),
   qualifications: z.string().trim().max(10000).optional().nullable(),
-  sortOrder: z.number().int().min(0),
+  sortOrder: z.number().int().min(0).optional(),
 }).strict();
 
 export const bidderParamsSchema = z.object({
@@ -91,4 +97,5 @@ export const evaluationParamsSchema = z.object({
 export const submitSchema = z.object({}).strict();
 
 export type ContractDraftInput = z.infer<typeof contractDraftSchema>;
+export type CreateContractInput = z.infer<typeof createContractSchema>;
 export type EvaluationInput = z.infer<typeof evaluationSchema>;

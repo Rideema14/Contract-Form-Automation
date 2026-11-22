@@ -58,7 +58,7 @@ export default function LoginPage() {
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
       void getCurrentUser()
-        .then(() => router.replace("/contracts"))
+        .then(() => router.replace("/dashboard"))
         .catch((error: unknown) => {
           if (!(error instanceof ApiError) || error.status !== 401) {
             setServerError("Unable to check your session. Please try again.");
@@ -81,7 +81,7 @@ export default function LoginPage() {
     setIsSubmitting(true);
     try {
       await login(email.trim(), password);
-      router.replace("/contracts");
+      router.replace("/dashboard");
     } catch (error) {
       setServerError(getLoginError(error));
     } finally {

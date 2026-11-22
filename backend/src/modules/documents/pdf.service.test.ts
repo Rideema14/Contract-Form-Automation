@@ -111,6 +111,43 @@ describe('final contract PDF', () => {
     expect(json).toContain('Competitive price');
   });
 
+  it('renders saved dynamic section labels and values from the pinned form version', () => {
+    const dynamicSource: FinalPdfSource = {
+      ...source,
+      form: {
+        ...source.form,
+        formSchemaVersion: {
+          version: 3,
+          definition: {
+            sections: [{
+              id: '550e8400-e29b-41d4-a716-446655440001',
+              title: 'Insurance Details',
+              description: 'Coverage provided',
+              sortOrder: 0,
+              fields: [{
+                id: '550e8400-e29b-41d4-a716-446655440002',
+                label: 'Policy type',
+                type: 'DROPDOWN',
+                placeholder: null,
+                helpText: null,
+                required: true,
+                defaultValue: null,
+                options: ['General liability'],
+                sortOrder: 0,
+              }],
+            }],
+          },
+        },
+        dynamicValues: { '550e8400-e29b-41d4-a716-446655440002': 'General liability' },
+      },
+    };
+    const content = JSON.stringify(buildDocDefinition(dynamicSource).content);
+    expect(content).toContain('Additional Contract Details (Form version 3)');
+    expect(content).toContain('Insurance Details');
+    expect(content).toContain('Policy type');
+    expect(content).toContain('General liability');
+  });
+
   it('generates a valid multi-page PDF for long bidder and audit tables', async () => {
     const longText = 'Supporting details '.repeat(80);
     const pdf = await generateFinalContractPdf({

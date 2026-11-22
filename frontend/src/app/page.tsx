@@ -1,37 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
-type HealthResponse = {
-  success: boolean;
-  message: string;
-};
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { LoaderCircle } from "lucide-react";
+import { ApiError } from "@/lib/api-client";
+import { getCurrentUser } from "@/services/auth";
 
 export default function HomePage() {
-  const [status, setStatus] = useState("Checking backend...");
-  const [error, setError] = useState("");
+  const router = useRouter();
 
   useEffect(() => {
-    fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/api/health`, {
-      credentials: "include",
-      cache: "no-store"
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return response.json() as Promise<HealthResponse>;
-      })
-      .then((data) => setStatus(data.message))
-      .catch((err: Error) => {
-        setError(err.message);
-        setStatus("Could not reach backend");
+    getCurrentUser()
+      .then(() => router.replace("/dashboard"))
+      .catch((error: unknown) => {
+        if (error instanceof ApiError && error.status === 401) {
+          router.replace("/login");
+        } else {
+          router.replace("/login");
+        }
       });
-  }, []);
+  }, [router]);
 
   return (
-    <main className="min-h-screen p-10">
-      <h1 className="text-2xl font-bold">Contract Forms Automation</h1>
-      <p className="mt-4">Backend status: {status}</p>
-      {error && <p className="text-red-600">Error: {error}</p>}
+    <main className="flex min-h-screen items-center justify-center" aria-label="Redirecting">
+      <LoaderCircle className="size-6 animate-spin text-muted-foreground" />
     </main>
   );
 }

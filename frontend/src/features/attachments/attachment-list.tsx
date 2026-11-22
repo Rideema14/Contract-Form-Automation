@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { downloadAttachment, listAttachments } from "./attachments-api";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { downloadAttachment, getAttachmentViewUrl, listAttachments } from "./attachments-api";
 import type { Attachment } from "./types";
 
 const CATEGORY_LABELS: Record<Attachment["category"], string> = {
@@ -10,6 +10,10 @@ const CATEGORY_LABELS: Record<Attachment["category"], string> = {
   COST_ESTIMATE_EXCEL: "Cost estimate (Excel)",
   GENERATED_PDF: "Final approved PDF",
 };
+
+function isPreviewable(mimeType: string): boolean {
+  return mimeType === "application/pdf" || mimeType.startsWith("image/");
+}
 
 interface AttachmentListProps {
   formId: string;
@@ -48,21 +52,39 @@ export function AttachmentList({ formId, refreshKey = 0 }: AttachmentListProps) 
   return (
     <ul className="space-y-2">
       {items.map((item) => (
-        <li key={item.id} className="flex items-center justify-between gap-4">
-          <span className="text-sm">
-            {item.fileName}{" "}
-            <span className="text-muted-foreground">
-              ({CATEGORY_LABELS[item.category]}, {formatSize(item.sizeBytes)})
-            </span>
-          </span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => downloadAttachment(formId, item).catch((caught: Error) => setError(caught.message))}
-          >
-            Download
-          </Button>
+        <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3">
+          <div className="min-w-0 text-sm">
+            <p className="break-all font-medium">{item.displayName || item.fileName}</p>
+            <p className="break-all text-xs text-muted-foreground">
+              Original filename: {item.originalFileName || item.fileName}
+            </p>
+            <p className="text-muted-foreground">
+              {CATEGORY_LABELS[item.category]} · {formatSize(item.sizeBytes)} · {item.mimeType}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Uploaded by {item.uploadedById} · {new Date(item.createdAt).toLocaleString()}
+            </p>
+          </div>
+          <div className="flex shrink-0 gap-2">
+            {isPreviewable(item.mimeType) && (
+              <a
+                href={getAttachmentViewUrl(formId, item.id)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={buttonVariants({ variant: "outline", size: "sm" })}
+              >
+                View
+              </a>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => downloadAttachment(formId, item).catch((caught: Error) => setError(caught.message))}
+            >
+              Download
+            </Button>
+          </div>
         </li>
       ))}
     </ul>

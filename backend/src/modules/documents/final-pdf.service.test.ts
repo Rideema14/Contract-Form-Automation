@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Readable } from 'node:stream';
+import { unzipSync } from 'fflate';
 import { AppError } from '../../utils/app-error';
 import { InMemoryAttachmentRepository } from './attachment.types';
 import { DocumentService } from './document.service';
@@ -9,9 +10,20 @@ import { FinalPdfSource } from './pdf.service';
 
 class FakeDrive implements DriveStorage {
   uploads = 0;
-  async upload() { this.uploads++; return { driveFileId: `d${this.uploads}` }; }
-  async download() { return Readable.from(['x']); }
-  async remove() {}
+  files = new Map<string, Buffer>();
+  async upload({ body }: { name: string; mimeType: string; body: Readable; contractFormId: string }) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of body) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const id = `d${++this.uploads}`;
+    this.files.set(id, Buffer.concat(chunks));
+    return { driveFileId: id };
+  }
+  async download(id: string) {
+    const content = this.files.get(id);
+    if (!content) throw new Error('Drive file not found');
+    return Readable.from([content]);
+  }
+  async remove(id: string) { this.files.delete(id); }
 }
 
 const form = (status: string) => ({ id: 'f1', referenceNo: 'CF-1', status }) as unknown as FinalPdfSource['form'];
@@ -27,7 +39,7 @@ function setup(status = 'APPROVED') {
     loadForm: async () => form(status),
     loadHistory: async () => history,
   });
-  return { drive, generate, service };
+  return { drive, documents, generate, service };
 }
 
 describe('final PDF service', () => {
@@ -75,5 +87,89 @@ describe('final PDF service', () => {
     });
     await expect(service.generateAndStoreFinalPdf('f1', actor)).rejects.toThrow('pdf failed');
     expect(AppError).toBeDefined();
+  });
+
+  it('creates a ZIP with the complete form PDF and original supporting files', async () => {
+    const { drive, documents, generate, service } = setup();
+    const supportingPdf = Buffer.from('%PDF-supporting-document');
+    const spreadsheet = Buffer.from('saved spreadsheet bytes');
+    await documents.storeGeneratedFile({
+      contractFormId: 'f1',
+      category: 'SUPPORTING',
+      uploadedById: 'u1',
+      fileName: 'vendor-quote.pdf',
+      mimeType: 'application/pdf',
+      content: supportingPdf,
+    });
+    await documents.storeGeneratedFile({
+      contractFormId: 'f1',
+      category: 'COST_ESTIMATE_EXCEL',
+      uploadedById: 'u1',
+      fileName: 'estimate.xlsx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      content: spreadsheet,
+    });
+
+    const result = await service.generatePackage('f1', actor);
+    const entries = unzipSync(result.content);
+
+    expect(result.fileName).toBe('Contract_CF-1_Full_Package.zip');
+    expect(Object.keys(entries).sort()).toEqual([
+      'Contract_Form.pdf',
+      'Supporting_Documents/estimate.xlsx',
+      'Supporting_Documents/vendor-quote.pdf',
+    ]);
+    expect(Buffer.from(entries['Contract_Form.pdf'])).toEqual(Buffer.from('%PDF-fake'));
+    expect(Buffer.from(entries['Supporting_Documents/vendor-quote.pdf'])).toEqual(supportingPdf);
+    expect(Buffer.from(entries['Supporting_Documents/estimate.xlsx'])).toEqual(spreadsheet);
+    expect(generate).toHaveBeenCalledOnce();
+    expect(drive.uploads).toBe(3);
+  });
+
+  it('reuses an existing generated PDF when creating a package', async () => {
+    const { drive, documents, generate, service } = setup();
+    const savedPdf = Buffer.from('%PDF-existing-final');
+    await documents.storeGeneratedFile({
+      contractFormId: 'f1',
+      category: 'GENERATED_PDF',
+      uploadedById: 'u1',
+      fileName: 'CF-1.pdf',
+      mimeType: 'application/pdf',
+      content: savedPdf,
+    });
+
+    const result = await service.generatePackage('f1', actor);
+    const entries = unzipSync(result.content);
+
+    expect(Buffer.from(entries['Contract_Form.pdf'])).toEqual(savedPdf);
+    expect(generate).not.toHaveBeenCalled();
+    expect(drive.uploads).toBe(1);
+  });
+
+  it('does not create a package when a stored Drive file is missing', async () => {
+    const { drive, documents, service } = setup();
+    const generated = await documents.storeGeneratedFile({
+      contractFormId: 'f1',
+      category: 'GENERATED_PDF',
+      uploadedById: 'u1',
+      fileName: 'CF-1.pdf',
+      mimeType: 'application/pdf',
+      content: Buffer.from('%PDF-existing-final'),
+    });
+    drive.files.delete(generated.driveFileId);
+
+    await expect(service.generatePackage('f1', actor)).rejects.toMatchObject({
+      statusCode: 502,
+      code: 'PACKAGE_FILE_UNAVAILABLE',
+    });
+  });
+
+  it('refuses to create a package before approval', async () => {
+    const { drive, service } = setup('PENDING_APPROVAL');
+    await expect(service.generatePackage('f1', actor)).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'FORM_NOT_APPROVED',
+    });
+    expect(drive.uploads).toBe(0);
   });
 });
