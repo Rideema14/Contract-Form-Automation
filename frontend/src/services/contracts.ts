@@ -5,8 +5,11 @@ import type {
   ContractListResponse,
   ContractStatus,
   ContractDraft,
+  CreateContractDraft,
   CostLine,
   Evaluation,
+  FormSchemaDefinition,
+  FormSchemaVersion,
   Quotation,
   ReferenceData,
 } from "@/types/contracts";
@@ -52,8 +55,27 @@ export function getContract(id: string): Promise<Contract> {
   return apiGet<Contract>(`/forms/${id}`);
 }
 
-export function createContract(body: ContractDraft): Promise<Contract> {
+export function createContract(body: CreateContractDraft): Promise<Contract> {
   return apiPost<Contract>("/forms", body);
+}
+
+export function getPublishedFormSchema(): Promise<FormSchemaVersion> {
+  return apiGet<FormSchemaVersion>("/form-builder/published");
+}
+
+export function getFormSchemaDraft(): Promise<{
+  draft: FormSchemaDefinition;
+  latest: FormSchemaVersion;
+}> {
+  return apiGet<{ draft: FormSchemaDefinition; latest: FormSchemaVersion }>("/form-builder/draft");
+}
+
+export function saveFormSchemaDraft(definition: FormSchemaDefinition): Promise<unknown> {
+  return apiPut("/form-builder/draft", definition);
+}
+
+export function publishFormSchema(): Promise<FormSchemaVersion> {
+  return apiPost<FormSchemaVersion>("/form-builder/publish", {});
 }
 
 export function updateContract(id: string, body: ContractDraft): Promise<Contract> {
@@ -70,7 +92,7 @@ export function deleteContract(
 ): Promise<{ id: string }> {
   return apiRequest<{ id: string }>(`/forms/${id}`, {
     method: "DELETE",
-    body: JSON.stringify(body),
+    body,
   });
 }
 
@@ -86,7 +108,7 @@ export function listBidders(formId: string): Promise<{ items: Bidder[] }> {
   return apiGet<{ items: Bidder[] }>(`/forms/${formId}/bidders`);
 }
 
-export function createBidder(formId: string, body: { vendorId?: string | null; companyName?: string; contactPerson?: string | null; email?: string | null; phone?: string | null; qualifications?: string | null; sortOrder: number }): Promise<Bidder> {
+export function createBidder(formId: string, body: { vendorId?: string | null; companyName?: string; contactPerson?: string | null; email?: string | null; phone?: string | null; qualifications?: string | null; sortOrder?: number }): Promise<Bidder> {
   return apiPost<Bidder>(`/forms/${formId}/bidders`, body);
 }
 

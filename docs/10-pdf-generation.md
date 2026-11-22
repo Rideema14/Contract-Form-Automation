@@ -9,7 +9,7 @@
 4. The PDF is stored in the contract's private Drive folder and its metadata is saved as `GENERATED_PDF`.
 5. Authorized users retrieve it through the backend attachment routes.
 
-The Admin-only `POST /api/forms/:formId/final-pdf` endpoint can retry or retrieve the existing final PDF. PDF/Drive failure does not roll back approval; the approval response reports the failure and an administrator can retry.
+The `POST /api/forms/:formId/final-pdf` endpoint lets an authorized Admin or assigned Approver download a ZIP containing `Contract_Form.pdf` and the contract's supporting files. It reuses the stored final PDF when present; otherwise, it calls the existing approved-only PDF service and stores one `GENERATED_PDF` attachment before packaging. The final PDF remains available separately in the contract's attachment list. PDF/Drive failure does not roll back approval; the approval response reports the failure and an administrator can retry through this package endpoint.
 
 ## Required Sections (14)
 | # | Section | Expected data source |
@@ -34,6 +34,8 @@ The Admin-only `POST /api/forms/:formId/final-pdf` endpoint can retry or retriev
 - Approved-only, idempotent storage: `backend/src/modules/documents/final-pdf.service.ts`.
 - Final PDF is stored as a `GENERATED_PDF` attachment; its Drive file ID is never exposed to the client.
 - Page size, exact labels, branding, and layout matching: **pending the company sample PDF**.
+- Contracts retain their `FormSchemaVersion`; the final PDF renders that pinned version's additional
+  sections and saved dynamic values without consulting the latest configuration.
 
 ## Remaining Acceptance
 - Obtain the company sample form (CL-01) and confirm any required field/label details (CL-09).

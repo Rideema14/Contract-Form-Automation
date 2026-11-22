@@ -48,11 +48,11 @@ const appErrors: ErrorRequestHandler = (err, _req, res, next) => {
 };
 
 let drive: FakeDrive;
-let pdfCalls: string[];
+let packageCalls: string[];
 
 function app() {
   drive = new FakeDrive();
-  pdfCalls = [];
+  packageCalls = [];
   const service = new DocumentService({ drive, repository: new InMemoryAttachmentRepository() });
   const a = express();
   a.use(
@@ -70,12 +70,12 @@ function app() {
         if (user.id === 'outsider') throw new AppError(403, 'FORBIDDEN', 'not allowed');
       },
       upload: createDocumentUploadMiddleware(config, 'files'),
-      ensureFinalPdf: async (formId) => {
-        pdfCalls.push(formId);
-        return service.storeGeneratedFile({
-          contractFormId: formId, category: 'GENERATED_PDF', uploadedById: 'sys',
-          fileName: 'final.pdf', mimeType: PDF, content: Buffer.from('%PDF-x'),
-        });
+      generatePackage: async (formId) => {
+        packageCalls.push(formId);
+        return {
+          fileName: 'Contract_CF-1_Full_Package.zip',
+          content: Buffer.from('zip-content'),
+        };
       },
     })
   );
@@ -108,14 +108,60 @@ describe('attachments router', () => {
     expect(list.body.data).toHaveLength(1);
     expect(JSON.stringify(list.body)).not.toContain('drive-');
 
-    const dl = await request(a).get(`/api/forms/${FORM}/attachments/${item.id}/download`).set({ 'x-user': 'viewer:APPROVER' }).buffer(true);
-    expect(dl.status).toBe(200);
-    expect(dl.headers['content-disposition']).toContain('attachment; filename="quote.pdf"');
-    expect(dl.headers['x-content-type-options']).toBe('nosniff');
-    expect(dl.body.length).toBe(50);
+    for (const headers of [owner, { 'x-user': 'viewer:APPROVER' }, { 'x-user': 'admin:ADMIN' }]) {
+      const dl = await request(a)
+        .get(`/api/forms/${FORM}/attachments/${item.id}/download`)
+        .set(headers)
+        .buffer(true);
+      expect(dl.status).toBe(200);
+      expect(dl.headers['content-disposition']).toContain('attachment; filename="quote.pdf"');
+      expect(dl.headers['x-content-type-options']).toBe('nosniff');
+      expect(dl.body.length).toBe(50);
 
-    const view = await request(a).get(`/api/forms/${FORM}/attachments/${item.id}/view`).set(owner);
-    expect(view.headers['content-disposition']).toContain('inline');
+      const view = await request(a).get(`/api/forms/${FORM}/attachments/${item.id}/view`).set(headers);
+      expect(view.status).toBe(200);
+      expect(view.headers['content-disposition']).toContain('inline');
+    }
+  });
+
+  it('uploads multiple files with distinct display names and preserves original filenames', async () => {
+    const a = app();
+    const response = await request(a)
+      .post(`/api/forms/${FORM}/attachments`)
+      .set(owner)
+      .field('category', 'SUPPORTING')
+      .field('displayNames', 'Project brief')
+      .field('displayNames', 'Pricing backup')
+      .attach('files', Buffer.from('%PDF-one'), { filename: 'brief.pdf', contentType: PDF })
+      .attach('files', Buffer.from('%PDF-two'), { filename: 'pricing.pdf', contentType: PDF });
+
+    expect(response.status).toBe(201);
+    expect(response.body.data).toHaveLength(2);
+    expect(response.body.data.map((item: { originalFileName: string }) => item.originalFileName)).toEqual([
+      'brief.pdf',
+      'pricing.pdf',
+    ]);
+    expect(response.body.data.map((item: { displayName: string }) => item.displayName)).toEqual([
+      'Project brief',
+      'Pricing backup',
+    ]);
+    expect(drive.files.size).toBe(2);
+    expect(JSON.stringify(response.body)).not.toContain('drive-');
+  });
+
+  it('rejects a display-name count that does not match the files', async () => {
+    const a = app();
+    const response = await request(a)
+      .post(`/api/forms/${FORM}/attachments`)
+      .set(owner)
+      .field('category', 'SUPPORTING')
+      .field('displayNames', 'Only one name')
+      .attach('files', Buffer.from('%PDF-one'), { filename: 'brief.pdf', contentType: PDF })
+      .attach('files', Buffer.from('%PDF-two'), { filename: 'pricing.pdf', contentType: PDF });
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toBe('Provide one valid display name for each uploaded file');
+    expect(drive.files.size).toBe(0);
   });
 
   it('renames duplicates instead of overwriting', async () => {
@@ -136,8 +182,14 @@ describe('attachments router', () => {
   });
 
   it('denies viewing to users without access', async () => {
-    const res = await request(app()).get(`/api/forms/${FORM}/attachments`).set({ 'x-user': 'outsider:APPROVER' });
-    expect(res.status).toBe(403);
+    const a = app();
+    const up = await upload(a);
+    const headers = { 'x-user': 'outsider:APPROVER' };
+    const id = up.body.data[0].id;
+
+    expect((await request(a).get(`/api/forms/${FORM}/attachments`).set(headers)).status).toBe(403);
+    expect((await request(a).get(`/api/forms/${FORM}/attachments/${id}/view`).set(headers)).status).toBe(403);
+    expect((await request(a).get(`/api/forms/${FORM}/attachments/${id}/download`).set(headers)).status).toBe(403);
   });
 
   it('does not allow an attachment id to be used under another form', async () => {
@@ -174,13 +226,31 @@ describe('attachments router', () => {
     expect(drive.files.size).toBe(0);
   });
 
-  it('lets only admins trigger the final PDF', async () => {
+  it('allows only authorized admins and approvers to download the final package', async () => {
     const a = app();
-    const denied = await request(a).post(`/api/forms/${FORM}/final-pdf`).set(owner);
-    expect(denied.status).toBe(403);
-    const ok = await request(a).post(`/api/forms/${FORM}/final-pdf`).set({ 'x-user': 'admin:ADMIN' });
-    expect(ok.status).toBe(200);
-    expect(ok.body.data.category).toBe('GENERATED_PDF');
-    expect(pdfCalls).toEqual([FORM]);
+    const submitterDenied = await request(a).post(`/api/forms/${FORM}/final-pdf`).set(owner);
+    expect(submitterDenied.status).toBe(403);
+    const approverDenied = await request(a)
+      .post(`/api/forms/${FORM}/final-pdf`)
+      .set({ 'x-user': 'outsider:APPROVER' });
+    expect(approverDenied.status).toBe(403);
+
+    for (const headers of [{ 'x-user': 'viewer:APPROVER' }, { 'x-user': 'admin:ADMIN' }]) {
+      const response = await request(a)
+        .post(`/api/forms/${FORM}/final-pdf`)
+        .set(headers)
+        .buffer(true)
+        .parse((stream, callback) => {
+          const chunks: Buffer[] = [];
+          stream.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+          stream.on('end', () => callback(null, Buffer.concat(chunks)));
+        });
+      expect(response.status).toBe(200);
+      expect(response.headers['content-type']).toContain('application/zip');
+      expect(response.headers['content-disposition']).toContain('Contract_CF-1_Full_Package.zip');
+      expect(response.body.toString()).toBe('zip-content');
+    }
+
+    expect(packageCalls).toEqual([FORM, FORM]);
   });
 });

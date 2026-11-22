@@ -14,7 +14,7 @@ import { createAttachmentsRouter } from '../modules/documents/attachments.router
 import {
   assertCanViewAttachments,
   documentService,
-  generateAndStoreFinalPdf,
+  generateFinalPdfPackage,
 } from '../modules/documents/documents.runtime';
 import * as contractService from '../services/contract.service';
 import {
@@ -88,7 +88,7 @@ router.use(
     assertCanUpload: (formId, user) => contractService.assertCanUploadAttachments(formId, user as never),
     assertCanView: assertCanViewAttachments,
     upload: configuredDocumentUpload,
-    ensureFinalPdf: (formId, user) => generateAndStoreFinalPdf(formId, user),
+    generatePackage: (formId, user) => generateFinalPdfPackage(formId, user),
   }),
 );
 

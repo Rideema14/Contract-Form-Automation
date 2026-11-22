@@ -7,6 +7,9 @@ export type ContractStatus =
 
 export type Contract = {
   id: string;
+  formSchemaVersionId: string;
+  dynamicValues: DynamicValues;
+  formSchemaVersion?: FormSchemaVersion;
   referenceNo: string | null;
   title: string | null;
   sponsorDepartmentId: string | null;
@@ -50,13 +53,63 @@ export type ContractDraft = {
   recommendedVendorId?: string | null;
   recommendedBidderId?: string | null;
   selectionRationale?: string | null;
+  dynamicValues?: DynamicValues;
+};
+
+export type CreateContractDraft = ContractDraft & {
+  formSchemaVersionId?: string;
+};
+
+export type FormFieldType =
+  | "SHORT_TEXT"
+  | "LONG_TEXT"
+  | "NUMBER"
+  | "EMAIL"
+  | "DATE"
+  | "DROPDOWN"
+  | "MULTI_SELECT"
+  | "RADIO"
+  | "CHECKBOX";
+
+export type DynamicValue = string | boolean | string[] | null;
+export type DynamicValues = Record<string, DynamicValue>;
+
+export type FormSchemaField = {
+  id: string;
+  label: string;
+  type: FormFieldType;
+  placeholder: string | null;
+  helpText: string | null;
+  required: boolean;
+  defaultValue: DynamicValue;
+  options: string[];
+  sortOrder: number;
+};
+
+export type FormSchemaSection = {
+  id: string;
+  title: string;
+  description: string | null;
+  sortOrder: number;
+  fields: FormSchemaField[];
+};
+
+export type FormSchemaDefinition = {
+  sections: FormSchemaSection[];
+};
+
+export type FormSchemaVersion = {
+  id: string;
+  version: number;
+  definition: FormSchemaDefinition;
+  publishedAt: string;
 };
 
 export type Vendor = {
   id: string;
   name: string;
   vendorType?: { id: string; name: string };
-  contactDetails?: Record<string, string> | null;
+  contactDetails?: Record<string, unknown> | null;
 };
 
 export type Bidder = {
@@ -103,6 +156,8 @@ export type Attachment = {
   id: string;
   category: string;
   fileName: string;
+  originalFileName?: string | null;
+  displayName?: string | null;
   mimeType: string;
   sizeBytes: number;
   uploadedById: string;
@@ -128,6 +183,7 @@ export type ApprovalDecision = {
 export type ReferenceData = {
   departments: { id: string; name: string }[];
   categories: { id: string; name: string }[];
+  vendorTypes: { id: string; name: string }[];
   currencies: { id: string; code: string; name: string }[];
   vendors: Vendor[];
 };

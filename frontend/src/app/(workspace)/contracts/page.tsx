@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   ChevronLeft,
   ChevronRight,
   Eye,
+  LogOut,
   Pencil,
   Plus,
   RefreshCw,
@@ -36,6 +38,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { NewContractLink } from "@/components/contracts/NewContractLink";
 import {
   Select,
   SelectContent,
@@ -53,6 +56,7 @@ import {
 } from "@/components/ui/table";
 import { ApiError } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
+import { logout } from "@/services/auth";
 import { deleteContract, listContracts } from "@/services/contracts";
 import type {
   Contract,
@@ -68,13 +72,6 @@ const statusLabels: Record<ContractStatus, string> = {
   RETURNED: "Returned",
   APPROVED: "Approved",
   REJECTED: "Rejected",
-};
-const statusTones: Record<ContractStatus, string> = {
-  DRAFT: "bg-sky-100 text-sky-800",
-  PENDING_APPROVAL: "bg-amber-100 text-amber-800",
-  RETURNED: "bg-orange-100 text-orange-800",
-  APPROVED: "bg-emerald-100 text-emerald-800",
-  REJECTED: "bg-rose-100 text-rose-800",
 };
 
 function formatAmount(contract: Contract): string {
@@ -96,6 +93,7 @@ function getErrorMessage(error: unknown): string {
 }
 
 export default function ContractsPage() {
+  const router = useRouter();
   const { authUser } = useAuth();
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [pagination, setPagination] = useState<PaginationMetadata>({
@@ -114,6 +112,7 @@ export default function ContractsPage() {
   const [deletionReason, setDeletionReason] = useState("");
   const [deletionConfirmed, setDeletionConfirmed] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const isAdmin = authUser?.role === "ADMIN";
 
   const loadContracts = useCallback(async () => {
@@ -164,7 +163,17 @@ export default function ContractsPage() {
   }
 
   async function confirmDelete() {
-    if (!deleteTarget || !isAdmin || deletionReason.trim().length < 10 || !deletionConfirmed) {
+    const canDelete =
+      isAdmin ||
+      (authUser?.role === "SUBMITTER" &&
+        deleteTarget?.createdById === authUser.id);
+    if (
+      !deleteTarget ||
+      deleteTarget.status !== "DRAFT" ||
+      !canDelete ||
+      deletionReason.trim().length < 10 ||
+      !deletionConfirmed
+    ) {
       return;
     }
 
@@ -194,50 +203,78 @@ export default function ContractsPage() {
     }
   }
 
+  async function handleLogout() {
+    setIsLoggingOut(true);
+    try {
+      await logout();
+      router.replace("/login");
+    } catch (logoutError) {
+      toast.error(
+        logoutError instanceof ApiError
+          ? logoutError.message
+          : "Could not sign out.",
+      );
+    } finally {
+      setIsLoggingOut(false);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-muted/30 p-4 sm:p-6 lg:p-10">
       <div className="mx-auto flex max-w-7xl flex-col gap-6">
-        <section className="flex flex-wrap items-end justify-between gap-5 border-b border-border/70 pb-6">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div>
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Contract register</p>
-              <h1 className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl">My forms</h1>
-              <p className="mt-2 max-w-xl text-sm text-muted-foreground">Find a request, check its status, or continue working on a draft.</p>
+            <h1 className="text-2xl font-bold tracking-tight">My forms</h1>
+            <p className="text-muted-foreground">
+              View and manage your contract forms.
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
-              <Link href="/contracts/new" className={buttonVariants({ className: "h-10 rounded-xl px-4" })}>
-                <Plus data-icon="inline-start" />
-                New contract
-              </Link>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleLogout()}
+              disabled={isLoggingOut}
+            >
+              <LogOut data-icon="inline-start" />
+              {isLoggingOut ? "Signing out..." : "Sign out"}
+            </Button>
+            <NewContractLink className={buttonVariants()}>
+              <Plus data-icon="inline-start" />
+              New contract
+            </NewContractLink>
           </div>
-        </section>
+        </div>
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg font-semibold">Contract register</CardTitle>
-            <CardDescription>Search by title or reference, or filter by workflow status.</CardDescription>
+            <CardTitle>Contract register</CardTitle>
+            <CardDescription>
+              Search your forms and filter them by workflow status.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <form
-              className="flex flex-col gap-3 sm:flex-row sm:items-end"
+              className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_13rem_auto_auto] sm:items-end"
               onSubmit={submitSearch}
             >
-              <div className="flex-1 space-y-2">
+              <div className="min-w-0 space-y-2">
                 <Label htmlFor="contract-search">Search</Label>
                 <div className="relative">
                   <Search className="absolute top-2 left-2.5 size-4 text-muted-foreground" />
                   <Input
                     id="contract-search"
-                    className="pl-8"
+                    className="h-10 pl-8"
                     placeholder="Title or reference number"
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
                   />
                 </div>
               </div>
-              <div className="space-y-2 sm:w-52">
+              <div className="min-w-0 space-y-2">
                 <Label htmlFor="contract-status">Status</Label>
                 <Select value={status} onValueChange={changeStatus}>
-                  <SelectTrigger id="contract-status" className="w-full">
+                  <SelectTrigger id="contract-status" className="h-10 w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -250,13 +287,14 @@ export default function ContractsPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <Button type="submit" variant="outline">
+              <Button type="submit" variant="outline" className="h-10">
                 Search
               </Button>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
+                className="size-10"
                 aria-label="Refresh contracts"
                 onClick={() => void loadContracts()}
               >
@@ -296,6 +334,7 @@ export default function ContractsPage() {
                 </p>
               </div>
             ) : (
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -311,6 +350,10 @@ export default function ContractsPage() {
                 <TableBody>
                   {contracts.map((contract) => {
                     const isDraft = contract.status === "DRAFT";
+                    const canDelete =
+                      isAdmin ||
+                      (authUser?.role === "SUBMITTER" &&
+                        contract.createdById === authUser.id);
                     return (
                       <TableRow key={contract.id}>
                         <TableCell className="min-w-52">
@@ -333,7 +376,15 @@ export default function ContractsPage() {
                             "—"}
                         </TableCell>
                         <TableCell>
-                          <Badge variant="outline" className={`rounded-full border-0 px-2.5 font-medium ${statusTones[contract.status]}`}>
+                          <Badge
+                            variant={
+                              contract.status === "REJECTED"
+                                ? "destructive"
+                                : contract.status === "DRAFT"
+                                  ? "secondary"
+                                  : "outline"
+                            }
+                          >
                             {statusLabels[contract.status]}
                           </Badge>
                         </TableCell>
@@ -341,36 +392,39 @@ export default function ContractsPage() {
                         <TableCell>
                           <div className="flex justify-end gap-1">
                             <Link
-                              href={`/contracts/${contract.id}`}
+                              href={`/contracts/${contract.id}?return=${encodeURIComponent("/contracts")}`}
                               className={buttonVariants({
                                 variant: "ghost",
                                 size: "icon-sm",
                               })}
                               aria-label={`View ${contract.title || "contract"}`}
+                              title="View contract"
                             >
                               <Eye />
                             </Link>
                             {isDraft && (
                               <>
                                 <Link
-                                  href={`/contracts/${contract.id}?edit=1`}
+                                  href={`/contracts/${contract.id}?edit=1&return=${encodeURIComponent("/contracts")}`}
                                   className={buttonVariants({
                                     variant: "ghost",
                                     size: "icon-sm",
                                   })}
                                   aria-label={`Edit ${contract.title || "contract"}`}
+                                  title="Edit draft"
                                 >
                                   <Pencil />
                                 </Link>
                               </>
                             )}
-                            {isAdmin && (
+                            {isDraft && canDelete && (
                               <Button
                                 type="button"
                                 variant="ghost"
                                 size="icon-sm"
                                 className="text-destructive hover:text-destructive"
                                 aria-label={`Delete ${contract.title || "contract"}`}
+                                title="Delete draft"
                                 onClick={() => setDeleteTarget(contract)}
                               >
                                 <Trash2 />
@@ -383,6 +437,7 @@ export default function ContractsPage() {
                   })}
                 </TableBody>
               </Table>
+              </div>
             )}
 
             {!isLoading && !error && pagination.totalItems > 0 && (
@@ -458,7 +513,7 @@ export default function ContractsPage() {
                 onChange={(event) => setDeletionConfirmed(event.target.checked)}
                 className="mt-1"
               />
-              I confirm I am authorized to approve this deletion.
+              I confirm that I am authorized to delete this draft.
             </label>
           </div>
           <DialogFooter>

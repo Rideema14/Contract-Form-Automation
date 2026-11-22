@@ -10,6 +10,7 @@ import {
   contractListQuerySchema,
   costLineParamsSchema,
   costLineSchema,
+  createContractSchema,
   evaluationSchema,
   evaluationsSchema,
   quotationParamsSchema,
@@ -61,7 +62,7 @@ export async function createContract(
   try {
     const data = await contractService.createDraft(
       user(req),
-      parse(contractDraftSchema.safeParse(req.body))
+      parse(createContractSchema.safeParse(req.body))
     );
 
     sendSuccess(req, res, 201, 'Contract created', data);
@@ -158,9 +159,6 @@ export async function deleteContract(req: Request, res: Response, next: NextFunc
   try {
     const { id } = parse(contractIdSchema.safeParse(req.params));
     const currentUser = user(req);
-    if (currentUser.role !== 'ADMIN') {
-      throw new AppError(403, 'FORBIDDEN', 'Only an administrator may authorize contract deletion');
-    }
 
     const body = parse(
       z.object({
@@ -169,6 +167,7 @@ export async function deleteContract(req: Request, res: Response, next: NextFunc
       }).strict().safeParse(req.body)
     );
 
+    await contractService.assertCanDeleteContract(id, currentUser);
     await deleteContractAttachments(id);
     await contractService.deleteContract(id, currentUser, body.reason);
     sendSuccess(req, res, 200, 'Contract deleted; audit history retained', { id });

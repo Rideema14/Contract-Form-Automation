@@ -18,9 +18,11 @@ import {
   RotateCcw,
   ExternalLink,
 } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth';
 
-export function NotificationBell({ className = '' }: { className?: string }) {
+export function NotificationBell() {
   const router = useRouter();
+  const { authUser } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -89,9 +91,17 @@ export function NotificationBell({ className = '' }: { className?: string }) {
 
     setIsOpen(false);
 
-    if (item.contractFormId) {
-      router.push(`/approvals`);
+    if (!item.contractFormId) return;
+    if (authUser?.role === 'SUBMITTER') {
+      const status = item.contractForm?.status;
+      const section = status === 'APPROVED' ? 'approved'
+        : status === 'RETURNED' ? 'returned'
+          : status === 'REJECTED' ? 'rejected'
+            : 'pending';
+      router.push(`/approvals?status=${section}&contract=${encodeURIComponent(item.contractFormId)}`);
+      return;
     }
+    router.push('/approvals');
   };
 
   const handleMarkAllRead = async () => {
@@ -110,7 +120,7 @@ export function NotificationBell({ className = '' }: { className?: string }) {
         variant="ghost"
         size="icon"
         onClick={handleToggle}
-        className={`relative ${className}`}
+        className="relative"
         aria-label="Notifications"
         title="Notifications"
       >

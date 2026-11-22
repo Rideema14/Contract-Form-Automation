@@ -13,8 +13,10 @@ export interface AttachmentRecord {
   id: string;
   contractFormId: string;
   category: AttachmentCategory;
-  /** Sanitised, de-duplicated display name. */
+  /** Sanitised, de-duplicated filename used for storage and downloads. */
   fileName: string;
+  originalFileName: string | null;
+  displayName: string | null;
   mimeType: string;
   sizeBytes: number;
   /** Private Drive id. Never returned to clients. */

@@ -71,29 +71,22 @@ describe('contract request validation', () => {
   });
 });
 
-describe('contract retention policy', () => {
-  it('does not allow submitters to delete a contract', async () => {
-    await expect(
-      deleteContract('form-1', submitter, 'Approved deletion request'),
-    ).rejects.toMatchObject({
-      statusCode: 403,
-      code: 'FORBIDDEN',
-    });
-  });
-
-  it('retains existing audit events and records the Admin-approved deletion', async () => {
-    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
-      id: 'form-1',
-      referenceNo: 'CF-0001',
-      title: 'Archived project',
-    } as never);
-
+describe('contract deletion authorization', () => {
+  function mockDeletionTransaction(form: {
+    id: string;
+    createdById: string;
+    status: ContractStatus;
+    referenceNo: string;
+    title: string;
+  } | null) {
     const auditUpdateMany = vi.fn().mockResolvedValue({ count: 2 });
     const auditCreate = vi.fn().mockResolvedValue({ id: 'audit-delete' });
     const contractDelete = vi.fn().mockResolvedValue({ id: 'form-1' });
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const tx = {
       contractForm: {
-        update: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(form),
+        updateMany,
         delete: contractDelete,
       },
       bidder: {
@@ -115,38 +108,112 @@ describe('contract retention policy', () => {
     vi.spyOn(prisma, '$transaction').mockImplementation(
       async (callback) => callback(tx as never) as never,
     );
+    return { tx, auditUpdateMany, auditCreate, contractDelete, updateMany };
+  }
 
-    await deleteContract('form-1', admin, 'Duplicate record approved for deletion');
+  const draft = (overrides: Partial<{
+    id: string;
+    createdById: string;
+    status: ContractStatus;
+    referenceNo: string;
+    title: string;
+  }> = {}) => ({
+    id: 'form-1',
+    createdById: submitter.id,
+    status: ContractStatus.DRAFT,
+    referenceNo: 'CF-0001',
+    title: 'Draft project',
+    ...overrides,
+  });
 
-    expect(auditUpdateMany).toHaveBeenCalledWith({
+  it('allows a Submitter to delete their own draft and records the audit event', async () => {
+    const mocks = mockDeletionTransaction(draft());
+
+    await deleteContract('form-1', submitter, 'Duplicate draft record');
+
+    expect(mocks.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'form-1',
+        status: ContractStatus.DRAFT,
+        createdById: submitter.id,
+      },
+      data: { recommendedBidderId: null, recommendedVendorId: null },
+    });
+    expect(mocks.contractDelete).toHaveBeenCalledWith({ where: { id: 'form-1' } });
+    expect(mocks.auditUpdateMany).toHaveBeenCalledWith({
       where: { contractFormId: 'form-1' },
       data: { contractFormId: null },
     });
-    expect(auditCreate).toHaveBeenCalledWith({
+    expect(mocks.auditCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        actorId: admin.id,
+        actorId: submitter.id,
         action: 'CONTRACT_DELETED',
-        entityType: 'ContractForm',
         entityId: 'form-1',
-        details: expect.objectContaining({
-          reason: 'Duplicate record approved for deletion',
-          referenceNo: 'CF-0001',
-        }),
+        details: expect.objectContaining({ reason: 'Duplicate draft record' }),
       }),
     });
-    expect(tx.auditLog).not.toHaveProperty('deleteMany');
-    expect(contractDelete).toHaveBeenCalledWith({ where: { id: 'form-1' } });
+  });
+
+  it('rejects a Submitter deleting another user’s draft', async () => {
+    const mocks = mockDeletionTransaction(draft({ createdById: 'another-user' }));
+
+    await expect(
+      deleteContract('form-1', submitter, 'Unauthorized deletion'),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'FORBIDDEN' });
+    expect(mocks.updateMany).not.toHaveBeenCalled();
+    expect(mocks.contractDelete).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ContractStatus.APPROVED,
+    ContractStatus.PENDING_APPROVAL,
+    ContractStatus.RETURNED,
+    ContractStatus.REJECTED,
+  ])('rejects a Submitter deleting a %s contract', async (status) => {
+    const mocks = mockDeletionTransaction(draft({ status }));
+
+    await expect(
+      deleteContract('form-1', submitter, 'Unauthorized deletion'),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'FORBIDDEN' });
+    expect(mocks.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('allows an Admin to delete a draft and rejects an Admin deleting a non-draft', async () => {
+    const successMocks = mockDeletionTransaction(draft());
+
+    await deleteContract('form-1', admin, 'Duplicate draft record');
+    expect(successMocks.contractDelete).toHaveBeenCalledWith({ where: { id: 'form-1' } });
+
+    vi.restoreAllMocks();
+    const deniedMocks = mockDeletionTransaction(draft({ status: ContractStatus.APPROVED }));
+    await expect(
+      deleteContract('form-1', admin, 'Approved record cleanup'),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'FORBIDDEN' });
+    expect(deniedMocks.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects an Approver deleting a draft', async () => {
+    const transaction = vi.spyOn(prisma, '$transaction');
+
+    await expect(
+      deleteContract('form-1', approver, 'Unauthorized deletion'),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'FORBIDDEN' });
+    expect(transaction).not.toHaveBeenCalled();
   });
 });
 
-describe('Admin contract deletion endpoint', () => {
+describe('contract deletion endpoint authorization', () => {
   const formId = '550e8400-e29b-41d4-a716-446655440001';
+  const validBody = {
+    reason: 'Duplicate draft record',
+    confirm: true as const,
+  };
 
-  function context(authUser: unknown, body: Record<string, unknown> = {}) {
+  function context(authUser: unknown, body: Record<string, unknown> = validBody, id = formId) {
     return {
       req: {
         requestId: 'delete-test',
-        params: { id: formId },
+        params: { id },
         body,
         authUser,
       } as unknown as Request,
@@ -158,56 +225,95 @@ describe('Admin contract deletion endpoint', () => {
     };
   }
 
-  it('requires an Admin, a reason, and explicit confirmation before touching Drive', async () => {
-    const denied = context(submitter, { reason: 'Approved cleanup', confirm: true });
-    const invalid = context(admin, { reason: 'short', confirm: true });
+  it('rejects direct API requests that violate ownership, role, or draft status', async () => {
+    const cases = [
+      { user: submitter, form: { ...draftForEndpoint(), createdById: 'another-user' } },
+      { user: submitter, form: { ...draftForEndpoint(), status: ContractStatus.APPROVED } },
+      { user: submitter, form: { ...draftForEndpoint(), status: ContractStatus.PENDING_APPROVAL } },
+      { user: admin, form: { ...draftForEndpoint(), status: ContractStatus.REJECTED } },
+      { user: approver, form: draftForEndpoint() },
+    ];
+    const findUnique = vi.spyOn(prisma.contractForm, 'findUnique');
+    for (const testCase of cases.slice(0, 4)) {
+      findUnique.mockResolvedValueOnce(testCase.form as never);
+    }
+    const cleanup = vi.spyOn(documentsRuntime, 'deleteContractAttachments');
+    const remove = vi.spyOn(contractService, 'deleteContract');
+
+    for (const testCase of cases) {
+      const request = context(testCase.user, validBody, formId);
+      await deleteContractHandler(request.req, request.res, request.next);
+      expect(request.next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 403, code: 'FORBIDDEN' }),
+      );
+    }
+
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it('allows an owned Submitter draft through the endpoint and preserves Drive-first cleanup', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue(
+      draftForEndpoint() as never,
+    );
+    const cleanup = vi.spyOn(documentsRuntime, 'deleteContractAttachments').mockResolvedValue();
+    const remove = vi.spyOn(contractService, 'deleteContract').mockResolvedValue({ id: formId } as never);
+    const request = context(submitter);
+
+    await deleteContractHandler(request.req, request.res, request.next);
+
+    expect(cleanup).toHaveBeenCalledWith(formId);
+    expect(remove).toHaveBeenCalledWith(formId, submitter, validBody.reason);
+    expect(cleanup.mock.invocationCallOrder[0]).toBeLessThan(remove.mock.invocationCallOrder[0]);
+    expect(request.next).not.toHaveBeenCalled();
+    expect(request.res.status).toHaveBeenCalledWith(200);
+  });
+
+  it('requires a valid reason and confirmation before checking deletion eligibility', async () => {
+    const request = context(admin, { reason: 'short', confirm: true });
+    const findUnique = vi.spyOn(prisma.contractForm, 'findUnique');
     const cleanup = vi.spyOn(documentsRuntime, 'deleteContractAttachments');
 
-    await deleteContractHandler(denied.req, denied.res, denied.next);
-    await deleteContractHandler(invalid.req, invalid.res, invalid.next);
+    await deleteContractHandler(request.req, request.res, request.next);
 
-    expect(denied.next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 403 }));
-    expect(invalid.next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 400 }));
+    expect(request.next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 400 }));
+    expect(findUnique).not.toHaveBeenCalled();
     expect(cleanup).not.toHaveBeenCalled();
   });
 
-  it('cleans Drive files before deleting database records and audit history', async () => {
-    const valid = context(admin, {
-      reason: 'Duplicate record approved for deletion',
-      confirm: true,
-    });
-    const cleanup = vi.spyOn(documentsRuntime, 'deleteContractAttachments').mockResolvedValue();
-    const remove = vi.spyOn(contractService, 'deleteContract').mockResolvedValue({ id: formId } as never);
-
-    await deleteContractHandler(valid.req, valid.res, valid.next);
-
-    expect(cleanup).toHaveBeenCalledWith(formId);
-    expect(remove).toHaveBeenCalledWith(formId, admin, 'Duplicate record approved for deletion');
-    expect(cleanup.mock.invocationCallOrder[0]).toBeLessThan(remove.mock.invocationCallOrder[0]);
-    expect(valid.next).not.toHaveBeenCalled();
-    expect(valid.res.status).toHaveBeenCalledWith(200);
-  });
-
   it('does not delete database records when Drive cleanup fails', async () => {
-    const valid = context(admin, {
-      reason: 'Duplicate record approved for deletion',
-      confirm: true,
-    });
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue(
+      draftForEndpoint() as never,
+    );
     vi.spyOn(documentsRuntime, 'deleteContractAttachments').mockRejectedValue(
-      new Error('Drive unavailable')
+      new Error('Drive unavailable'),
     );
     const remove = vi.spyOn(contractService, 'deleteContract');
+    const request = context(submitter);
 
-    await deleteContractHandler(valid.req, valid.res, valid.next);
+    await deleteContractHandler(request.req, request.res, request.next);
 
     expect(remove).not.toHaveBeenCalled();
-    expect(valid.next).toHaveBeenCalledWith(expect.any(Error));
+    expect(request.next).toHaveBeenCalledWith(expect.any(Error));
   });
 });
+
+function draftForEndpoint() {
+  return {
+    id: '550e8400-e29b-41d4-a716-446655440001',
+    createdById: submitter.id,
+    status: ContractStatus.DRAFT,
+    referenceNo: 'CF-0001',
+    title: 'Draft project',
+  };
+}
 
 describe('contract service authorization and persistence', () => {
   const completeForm = {
     id: 'form-1',
+    formSchemaVersionId: 'legacy-v1',
+    dynamicValues: {},
+    formSchemaVersion: { id: 'legacy-v1', version: 1, definition: { sections: [] } },
     createdById: submitter.id,
     status: ContractStatus.DRAFT,
     title: 'Project',
@@ -301,6 +407,12 @@ describe('contract service authorization and persistence', () => {
   });
 
   it('creates a draft owned by the authenticated user', async () => {
+    vi.spyOn(prisma.formSchemaVersion, 'findFirst').mockResolvedValue({
+      id: 'schema-v2',
+      version: 2,
+      definition: { sections: [] },
+      publishedAt: new Date(),
+    } as never);
     const create = vi.spyOn(prisma.contractForm, 'create').mockResolvedValue({
       id: 'form-1',
       status: ContractStatus.DRAFT,
@@ -317,11 +429,29 @@ describe('contract service authorization and persistence', () => {
         data: expect.objectContaining({
           createdById: submitter.id,
           status: ContractStatus.DRAFT,
+          formSchemaVersionId: 'schema-v2',
+          dynamicValues: {},
         }),
       }),
     );
 
     create.mockRestore();
+  });
+
+  it('rejects a stale published version when creating a contract', async () => {
+    vi.spyOn(prisma.formSchemaVersion, 'findFirst').mockResolvedValue({
+      id: 'schema-v3',
+      version: 3,
+      definition: { sections: [] },
+      publishedAt: new Date(),
+    } as never);
+    const create = vi.spyOn(prisma.contractForm, 'create');
+
+    await expect(createDraft(submitter, {
+      formSchemaVersionId: 'schema-v2',
+      title: 'Draft',
+    })).rejects.toMatchObject({ statusCode: 409, code: 'FORM_SCHEMA_CHANGED' });
+    expect(create).not.toHaveBeenCalled();
   });
 
   it('lists only the submitter-owned records', async () => {
@@ -745,6 +875,9 @@ describe('contract submission', () => {
   const approverId = '550e8400-e29b-41d4-a716-446655440002';
   const completeForm = {
     id: formId,
+    formSchemaVersionId: 'legacy-v1',
+    dynamicValues: {},
+    formSchemaVersion: { id: 'legacy-v1', version: 1, definition: { sections: [] } },
     createdById: submitter.id,
     status: ContractStatus.DRAFT,
     title: 'Project',

@@ -64,7 +64,7 @@ Excel estimate files are stored in Drive and linked through `documents` (type `C
 **approval_history**: `id`, `approval_id`, `form_id`, `actor_id`, `action` (SUBMITTED, APPROVED, RETURNED, REJECTED, RESUBMITTED), `comment`, `created_at`. Append-only.
 
 ### Documents
-**documents**: `id`, `form_id`, `type` (SUPPORTING, COST_ESTIMATE_EXCEL, GENERATED_PDF), `file_name`, `mime_type`, `size_bytes`, `drive_file_id`, `uploaded_by`, `created_at`. No file contents stored here.
+**documents**: `id`, `form_id`, `type` (SUPPORTING, COST_ESTIMATE_EXCEL, GENERATED_PDF), stored `file_name`, original uploaded filename, user-facing display name, `mime_type`, `size_bytes`, `drive_file_id`, `uploaded_by`, `created_at`. No file contents stored here.
 
 ### Audit logs
 **audit_logs**: `id`, `actor_id`, `action`, `entity_type`, `entity_id`, `form_id (nullable)`, `details (JSON, proposed)`, `created_at`. Append-only; no update/delete endpoints.

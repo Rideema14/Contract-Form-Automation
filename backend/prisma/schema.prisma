@@ -110,6 +110,8 @@ model Vendor {
 
 model ContractForm {
   id                   String             @id @default(uuid())
+  formSchemaVersionId  String
+  dynamicValues        Json               @default("{}")
   referenceNo          String?            @unique
   title                String?
   sponsorDepartmentId  String?
@@ -127,6 +129,7 @@ model ContractForm {
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
   createdBy            User               @relation("ContractFormCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  formSchemaVersion    FormSchemaVersion  @relation(fields: [formSchemaVersionId], references: [id], onDelete: Restrict)
   sponsorDepartment    Department?        @relation(fields: [sponsorDepartmentId], references: [id], onDelete: Restrict)
   contractCategory     ContractCategory?  @relation(fields: [contractCategoryId], references: [id], onDelete: Restrict)
   currency             Currency?          @relation(fields: [currencyId], references: [id], onDelete: Restrict)
@@ -145,6 +148,22 @@ model ContractForm {
   @@index([sponsorDepartmentId])
   @@index([contractCategoryId])
   @@index([createdAt])
+}
+
+model FormSchemaVersion {
+  id            String         @id @default(uuid())
+  version       Int            @unique
+  definition    Json
+  publishedAt  DateTime       @default(now())
+  contractForms ContractForm[]
+
+  @@index([publishedAt])
+}
+
+model FormSchemaDraft {
+  id         String   @id @default("active")
+  definition Json
+  updatedAt  DateTime @updatedAt
 }
 
 model Bidder {
@@ -217,6 +236,8 @@ model Attachment {
   contractFormId String
   category       AttachmentCategory
   fileName       String
+  originalFileName String?
+  displayName    String?
   mimeType       String
   sizeBytes      Int
   driveFileId    String             @unique

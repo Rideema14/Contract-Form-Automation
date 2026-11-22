@@ -139,6 +139,8 @@ export interface AttachmentItem {
   id: string;
   category: AttachmentCategory;
   fileName: string;
+  originalFileName?: string | null;
+  displayName?: string | null;
   mimeType: string;
   sizeBytes: number;
   uploadedById: string;

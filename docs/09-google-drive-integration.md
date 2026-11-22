@@ -27,11 +27,11 @@ Contract deletion is a manual Admin-only action that requires a reason and expli
 Validation checks extension, reported MIME type, filename, size, and request file count. It does not claim antivirus or malware scanning.
 
 ## Application Routes
-- `POST /api/forms/:formId/attachments` — authorized creator upload while the form is editable.
+- `POST /api/forms/:formId/attachments` — authorized creator upload while the form is editable; multipart fields are `category`, repeated `displayNames`, and repeated `files`.
 - `GET /api/forms/:formId/attachments` — authorized attachment metadata.
 - `GET /api/forms/:formId/attachments/:attachmentId/view` — inline view for supported types.
 - `GET /api/forms/:formId/attachments/:attachmentId/download` — authorized backend-mediated download.
-- `POST /api/forms/:formId/final-pdf` — administrator retry/generation endpoint; final approval also triggers PDF generation automatically.
+- `POST /api/forms/:formId/final-pdf` — Admin or assigned Approver downloads a ZIP containing the final contract PDF and all supporting files. The existing final PDF is reused; if none exists, the normal PDF service creates and stores it first. Final approval also triggers PDF generation automatically.
 - `DELETE /api/forms/:formId` — Admin only; requires a reason and explicit confirmation, removes Drive files before database records, and retains prior audit events plus an audit event for the deletion.
 
 The backend checks form access on every list, view, and download request. It returns safe metadata only and never returns the Drive ID.

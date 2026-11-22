@@ -1,242 +1,133 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import { AlertCircle, Loader2, RotateCcw } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useAuth } from "@/hooks/useAuth";
 import { apiGet, ApiError } from "@/lib/api-client";
-import type {
-  ApprovalPendingItem,
-  PaginationMeta,
-  PendingApprovalsResponse,
-} from "@/types/approval";
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableCell,
-} from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
-import { ApprovalStatusBadge } from "@/components/approvals/ApprovalStatusBadge";
-import { toast } from "sonner";
-import { Loader2, AlertCircle, RotateCcw, Inbox } from "lucide-react";
+import { listContracts } from "@/services/contracts";
+import type { Contract } from "@/types/contracts";
+import type { ApprovalPendingItem, PendingApprovalsResponse } from "@/types/approval";
+
+type SubmitterTab = "pending" | "approved" | "returned" | "rejected";
+
+const submitterTabs: { value: SubmitterTab; label: string }[] = [
+  { value: "pending", label: "Pending Approval" },
+  { value: "approved", label: "Approved" },
+  { value: "returned", label: "Returned" },
+  { value: "rejected", label: "Rejected" },
+];
 
 export default function ApprovalsPage() {
   const searchParams = useSearchParams();
-  const router = useRouter();
-
-  const page = Number(searchParams.get("page") ?? "1");
-  const pageSize = Number(searchParams.get("pageSize") ?? "20");
-
-  const [pending, setPending] = useState<ApprovalPendingItem[]>([]);
-  const [pagination, setPagination] = useState<PaginationMeta | undefined>(
-    undefined
+  const { authUser, loading: authLoading } = useAuth();
+  const requestedStatus = searchParams.get("status");
+  const [tab, setTab] = useState<SubmitterTab>(
+    submitterTabs.some((item) => item.value === requestedStatus) ? requestedStatus as SubmitterTab : "pending",
   );
+  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [pending, setPending] = useState<ApprovalPendingItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState("");
 
-  const fetchApprovals = useCallback(async () => {
+  const load = useCallback(async () => {
+    if (!authUser) return;
     setLoading(true);
-    setError(null);
-
+    setError("");
     try {
-      const res = await apiGet<PendingApprovalsResponse>(
-        `/approvals/pending?page=${page}&pageSize=${pageSize}`
-      );
-
-      setPending(res.items);
-      setPagination(res.meta?.pagination);
-    } catch (err: unknown) {
-      const msg =
-        err instanceof ApiError
-          ? err.message
-          : "Failed to load pending approvals";
-
-      setError(msg);
-      toast.error(msg);
-      setPending([]);
-      setPagination(undefined);
+      if (authUser.role === "SUBMITTER") {
+        const result = await listContracts({ page: 1, pageSize: 100 });
+        setContracts(result.items);
+      } else {
+        const result = await apiGet<PendingApprovalsResponse>("/approvals/pending?page=1&pageSize=100");
+        setPending(result.items);
+      }
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : "Could not load contract status.");
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize]);
+  }, [authUser]);
 
   useEffect(() => {
+    if (authLoading) return;
     const timeoutId = window.setTimeout(() => {
-      void fetchApprovals();
+      void load();
     }, 0);
-
     return () => window.clearTimeout(timeoutId);
-  }, [fetchApprovals]);
+  }, [authLoading, load]);
 
-  const handlePageChange = (newPage: number) => {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("page", String(newPage));
-    router.replace(`?${params.toString()}`);
-  };
+  if (authLoading || loading) {
+    return <main className="flex min-h-[50vh] items-center justify-center"><Loader2 className="size-6 animate-spin text-muted-foreground" /></main>;
+  }
+
+  if (authUser?.role !== "SUBMITTER") {
+    return (
+      <main className="container mx-auto space-y-6 p-4 sm:p-6">
+        <div className="flex items-center justify-between gap-3">
+          <div><h1 className="text-2xl font-bold">Pending Approvals</h1><p className="text-sm text-muted-foreground">Contracts awaiting your review.</p></div>
+          <button type="button" className={buttonVariants({ variant: "outline", size: "sm" })} onClick={() => void load()}><RotateCcw className="size-4" />Refresh</button>
+        </div>
+        {error ? <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">{error}</div> : pending.length === 0 ? <Card><CardContent className="p-10 text-center text-sm text-muted-foreground">No pending approvals.</CardContent></Card> : (
+          <div className="space-y-3">{pending.map((item) => (
+            <Card key={item.id}><CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-medium">{item.contractForm.title || "Untitled contract"}</p><p className="text-xs text-muted-foreground">{item.contractForm.referenceNo || "No reference number"} · Level {item.level}</p></div><Link href={`/approvals/${item.id}`} className={buttonVariants({ variant: "outline", size: "sm" })}>Review</Link></CardContent></Card>
+          ))}</div>
+        )}
+      </main>
+    );
+  }
+
+  const tabContracts = contracts.filter((contract) => {
+    if (tab === "pending") return contract.status === "PENDING_APPROVAL";
+    return contract.status === tab.toUpperCase();
+  });
+  const highlightedContract = searchParams.get("contract");
 
   return (
-    <div className="container mx-auto p-4 sm:p-6 space-y-6">
-      <section className="flex flex-wrap items-end justify-between gap-4 border-b border-border/70 pb-6">
-        <div>
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Approver workspace</p>
-            <h1 className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl">Pending approvals</h1>
-            <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-              Review contract details and documents, then record your decision.
-            </p>
-        </div>
-        <div>
-          <Button
-            variant="outline"
-            onClick={fetchApprovals}
-            disabled={loading}
-            className="rounded-xl"
-          >
-            <RotateCcw className={`size-4 ${loading ? "animate-spin" : ""}`} />
-            <span>Refresh queue</span>
-          </Button>
-        </div>
-      </section>
-
-      {loading ? (
-        <div className="flex flex-col items-center justify-center p-12 border rounded-xl bg-card text-muted-foreground gap-3">
-          <Loader2 className="animate-spin size-7 text-primary" />
-          <p className="text-xs">Loading pending approvals...</p>
-        </div>
-      ) : error ? (
-        <div className="flex flex-col items-center justify-center p-8 border border-destructive/20 bg-destructive/5 rounded-xl text-center space-y-3">
-          <div className="flex items-center gap-2 text-destructive font-medium text-sm">
-            <AlertCircle className="size-5 shrink-0" />
-            <span>{error}</span>
-          </div>
-
-          <p className="text-xs text-muted-foreground">
-            There was a problem retrieving your approvals queue.
-          </p>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={fetchApprovals}
-            className="gap-1.5"
-          >
-            <RotateCcw className="size-3.5" />
-            <span>Retry</span>
-          </Button>
-        </div>
-      ) : pending.length === 0 ? (
-        <div className="flex flex-col items-center justify-center p-12 border rounded-xl bg-card text-center space-y-3">
-          <div className="flex size-12 items-center justify-center rounded-full bg-muted">
-            <Inbox className="size-6 text-muted-foreground" />
-          </div>
-
-          <h3 className="font-semibold text-sm">No Pending Approvals</h3>
-
-          <p className="text-xs text-muted-foreground max-w-sm">
-            You do not have any contracts awaiting your review at this time.
-          </p>
-        </div>
+    <main className="container mx-auto space-y-6 p-4 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div><h1 className="text-2xl font-bold">Contract Status</h1><p className="text-sm text-muted-foreground">Track contracts submitted by you.</p></div>
+        <button type="button" className={buttonVariants({ variant: "outline", size: "sm" })} onClick={() => void load()}><RotateCcw className={`size-4 ${loading ? "animate-spin" : ""}`} />Refresh</button>
+      </div>
+      {error ? (
+        <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive"><AlertCircle className="size-4" />{error}</div>
       ) : (
-        <div className="border rounded-xl bg-card overflow-hidden shadow-xs">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableCell className="font-semibold">Contract</TableCell>
-                <TableCell className="font-semibold">Submitter</TableCell>
-                <TableCell className="font-semibold">Level</TableCell>
-                <TableCell className="font-semibold">Submitted At</TableCell>
-                <TableCell className="font-semibold">Status</TableCell>
-                <TableCell className="font-semibold text-right">
-                  Action
-                </TableCell>
-              </TableRow>
-            </TableHeader>
-
-            <TableBody>
-              {pending.map((item) => (
-                <TableRow key={item.id}>
-                  <TableCell>
-                    <div className="font-medium text-foreground">
-                      {item.contractForm.title ?? "Untitled Contract"}
-                    </div>
-
-                    {item.contractForm.referenceNo && (
-                      <div className="text-[11px] text-muted-foreground font-mono">
-                        {item.contractForm.referenceNo}
-                      </div>
-                    )}
-                  </TableCell>
-
-                  <TableCell>
-                    <div className="text-xs">
-                      {item.contractForm.createdBy.fullName}
-                    </div>
-
-                    <div className="text-[11px] text-muted-foreground">
-                      {item.contractForm.createdBy.email}
-                    </div>
-                  </TableCell>
-
-                  <TableCell>
-                    <span className="font-medium text-xs">
-                      Level {item.level}
-                    </span>
-                  </TableCell>
-
-                  <TableCell className="text-xs text-muted-foreground">
-                    {new Date(
-                      item.contractForm.submittedAt ??
-                        item.contractForm.createdAt
-                    ).toLocaleString()}
-                  </TableCell>
-
-                  <TableCell>
-                    <ApprovalStatusBadge status={item.status} />
-                  </TableCell>
-
-                  <TableCell className="text-right">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => router.push(`/approvals/${item.id}`)}
-                    >
-                      Review
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
-
-      {pagination && pagination.totalPages > 1 && (
-        <div className="flex justify-between items-center text-xs text-muted-foreground pt-2">
-          <span>
-            Showing page {page} of {pagination.totalPages} (
-            {pagination.totalItems} items)
-          </span>
-
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1 || loading}
-              onClick={() => handlePageChange(page - 1)}
-            >
-              Previous
-            </Button>
-
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= pagination.totalPages || loading}
-              onClick={() => handlePageChange(page + 1)}
-            >
-              Next
-            </Button>
+        <>
+          <div className="flex flex-wrap gap-2" role="tablist" aria-label="Contract status">
+            {submitterTabs.map((item) => (
+              <button key={item.value} type="button" role="tab" aria-selected={tab === item.value} onClick={() => setTab(item.value)} className={tab === item.value ? "rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground" : "rounded-md border px-3 py-2 text-sm hover:bg-muted"}>
+                {item.label}
+              </button>
+            ))}
           </div>
-        </div>
+          {tabContracts.length === 0 ? (
+            <Card><CardContent className="p-10 text-center"><p className="font-medium">No contracts in this status</p><p className="mt-1 text-sm text-muted-foreground">Submitted contracts will appear here.</p></CardContent></Card>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              {tabContracts.map((contract) => (
+                <Card key={contract.id} id={`contract-${contract.id}`} className={highlightedContract === contract.id ? "ring-2 ring-primary" : ""}>
+                  <CardHeader className="pb-3"><CardTitle className="text-base">{contract.title || "Untitled contract"}</CardTitle></CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2"><Badge variant="outline">{contract.status.replaceAll("_", " ")}</Badge><span className="text-xs text-muted-foreground">{contract.referenceNo || "No reference number"}</span></div>
+                    <p className="text-xs text-muted-foreground">Submitted: {contract.submittedAt ? new Date(contract.submittedAt).toLocaleString() : "Not submitted"} · Updated: {new Date(contract.updatedAt).toLocaleString()}</p>
+                    {(contract.status === "RETURNED" || contract.status === "REJECTED") && (contract.approvalDecisions?.length ?? 0) > 0 && (
+                      <p className="text-sm">{contract.approvalDecisions?.[contract.approvalDecisions.length - 1]?.comment || "No reason/comment provided."}</p>
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      <Link href={`/contracts/${contract.id}?return=${encodeURIComponent(`/approvals?status=${tab}`)}`} className={buttonVariants({ variant: "outline", size: "sm" })}>View</Link>
+                      {contract.status === "RETURNED" && <Link href={`/contracts/${contract.id}?edit=1&return=${encodeURIComponent(`/approvals?status=${tab}`)}`} className={buttonVariants({ size: "sm" })}>Edit and resubmit</Link>}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </>
       )}
-    </div>
+    </main>
   );
 }

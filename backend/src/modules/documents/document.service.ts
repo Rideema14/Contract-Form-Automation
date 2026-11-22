@@ -57,8 +57,12 @@ export class DocumentService {
     category: UserUploadCategory;
     uploadedById: string;
     files: UploadedFile[];
+    displayNames?: string[];
   }): Promise<AttachmentRecord[]> {
     const { drive, repository } = this.deps;
+    if (input.displayNames && input.displayNames.length !== input.files.length) {
+      throw new AppError(400, 'VALIDATION_ERROR', 'Provide one display name for each uploaded file');
+    }
 
     // COST_ESTIMATE_EXCEL must really be a spreadsheet (checked before anything is stored).
     if (input.category === 'COST_ESTIMATE_EXCEL') {
@@ -78,7 +82,7 @@ export class DocumentService {
     const driveFileIds: string[] = [];
 
     try {
-      for (const file of input.files) {
+      for (const [index, file] of input.files.entries()) {
         const fileName = resolveDuplicateFilename(sanitizeFilename(file.originalname), existing);
         existing.push(fileName);
 
@@ -94,6 +98,8 @@ export class DocumentService {
             contractFormId: input.contractFormId,
             category: input.category,
             fileName,
+            originalFileName: file.originalname,
+            displayName: input.displayNames?.[index] ?? file.originalname,
             mimeType: file.mimetype,
             sizeBytes: file.size,
             driveFileId,
@@ -198,6 +204,8 @@ export class DocumentService {
         contractFormId: input.contractFormId,
         category: input.category,
         fileName,
+        originalFileName: fileName,
+        displayName: fileName,
         mimeType: input.mimeType,
         sizeBytes: input.content.length,
         driveFileId,

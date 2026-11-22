@@ -2,6 +2,7 @@ import path from 'node:path';
 import pdfmake from 'pdfmake';
 import type { Content, TDocumentDefinitions } from 'pdfmake/interfaces';
 import { formatMoney, sumMoney } from './money';
+import type { DynamicValues, FormSchemaDefinition } from '../../schemas/form-builder.schema';
 
 type Dec = { toString(): string };
 
@@ -69,6 +70,11 @@ export interface FinalPdfSource {
       createdAt: Date;
       actor?: { fullName: string } | null;
     }>;
+    dynamicValues?: DynamicValues;
+    formSchemaVersion?: {
+      version: number;
+      definition: FormSchemaDefinition;
+    } | null;
   };
   history: {
     approvalSteps: Array<{ id: string; level: number; approver?: { fullName: string } | null }>;
@@ -134,6 +140,8 @@ export function buildDocDefinition(src: FinalPdfSource): TDocumentDefinitions {
   const decisions = [...history.decisions].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   const auditLogs = [...(form.auditLogs ?? [])].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   const costTotal = sumMoney(form.costLines.map((line) => line.amount.toString()));
+  const additionalSections = form.formSchemaVersion?.definition.sections ?? [];
+  const dynamicValues = form.dynamicValues ?? {};
 
   return {
     info: { title: `${reference} - ${form.title ?? 'Contract form'}` },
@@ -313,6 +321,26 @@ export function buildDocDefinition(src: FinalPdfSource): TDocumentDefinitions {
         ]),
         ['*', '*', '*', 'auto'],
       ),
+      ...(additionalSections.length ? [
+        heading(`Additional Contract Details (Form version ${form.formSchemaVersion?.version ?? '-'})`),
+        ...additionalSections.flatMap((section) => [
+          { text: section.title, bold: true, margin: [0, 4, 0, 3] } as Content,
+          ...(section.description ? [{ text: section.description, italics: true, margin: [0, 0, 0, 3] } as Content] : []),
+          table(
+            ['Field', 'Value'],
+            section.fields.map((field) => {
+              const value = dynamicValues[field.id];
+              const formatted = Array.isArray(value)
+                ? value.join(', ')
+                : typeof value === 'boolean'
+                  ? value ? 'Yes' : 'No'
+                  : value;
+              return [field.label, text(formatted)];
+            }),
+            ['35%', '*'],
+          ),
+        ]),
+      ] : []),
     ],
   };
 }

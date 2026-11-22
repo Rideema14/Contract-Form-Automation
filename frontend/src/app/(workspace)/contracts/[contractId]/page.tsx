@@ -13,19 +13,23 @@ import type { Contract, CostLine } from "@/types/contracts";
 import { ContractEditor } from "@/features/contracts/contract-editor";
 import { AttachmentList } from "@/features/attachments/attachment-list";
 import { AttachmentUploader } from "@/features/attachments/attachment-uploader";
-import { generateFinalPdf, getAttachmentLimits } from "@/features/attachments/attachments-api";
+import { downloadFinalPdfPackage, getAttachmentLimits } from "@/features/attachments/attachments-api";
 import type { UploadLimits } from "@/features/attachments/types";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 
 const labels: Record<string, string> = { DRAFT: "Draft", PENDING_APPROVAL: "Pending approval", RETURNED: "Returned", APPROVED: "Approved", REJECTED: "Rejected" };
-const statusTones: Record<string, string> = {
-  DRAFT: "bg-amber-500/10 text-amber-700",
-  PENDING_APPROVAL: "bg-violet-500/10 text-violet-700",
-  RETURNED: "bg-orange-500/10 text-orange-700",
-  APPROVED: "bg-emerald-500/10 text-emerald-700",
-  REJECTED: "bg-rose-500/10 text-rose-700",
-};
+const submitterStatusTabs = new Set(["pending", "approved", "returned", "rejected"]);
+
+function getReturnDestination(value: string | null): string {
+  if (value === "/dashboard" || value === "/contracts") return value;
+  if (value && /^\/approvals\/[a-zA-Z0-9_-]+$/.test(value)) return value;
+  if (value?.startsWith("/approvals?")) {
+    const status = new URLSearchParams(value.slice("/approvals?".length)).get("status");
+    if (status && submitterStatusTabs.has(status)) return `/approvals?status=${status}`;
+  }
+  return "/contracts";
+}
 
 function sumCostLines(lines: CostLine[]) {
   return lines.reduce((sum, line) => sum + Number(line.amount || 0), 0).toFixed(4);
@@ -37,23 +41,45 @@ export default function ContractDetailPage() {
   const [contract, setContract] = useState<Contract | null>(null);
   const [error, setError] = useState("");
   const edit = searchParams.get("edit") === "1";
+  const backHref = getReturnDestination(searchParams.get("return"));
+  const requestKey = `${params.contractId}:${edit}`;
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [limits, setLimits] = useState<UploadLimits | null>(null);
   const [attachmentRefresh, setAttachmentRefresh] = useState(0);
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const { authUser } = useAuth();
+  const view = searchParams.get("view") === "1";
 
   useEffect(() => {
+    if (view) return;
+    let active = true;
     getContract(params.contractId)
       .then((loaded) => {
+        if (!active) return;
         setContract(loaded);
+        setError("");
+        setLoadedKey(requestKey);
         return getAttachmentLimits(params.contractId)
-          .then(setLimits)
-          .catch(() => setLimits(null));
+          .then((loadedLimits) => {
+            if (active) setLimits(loadedLimits);
+          })
+          .catch(() => {
+            if (active) setLimits(null);
+          });
       })
-      .catch((loadError) => setError(loadError instanceof ApiError ? loadError.message : "Unable to load contract."));
-  }, [params.contractId]);
+      .catch((loadError) => {
+        if (!active) return;
+        setError(loadError instanceof ApiError ? loadError.message : "Unable to load contract.");
+        setLoadedKey(requestKey);
+      });
+    return () => {
+      active = false;
+    };
+  }, [params.contractId, edit, requestKey, view]);
 
-  if (edit) return <ContractEditor contractId={params.contractId} edit />;
+  if (view) return <ContractEditor contractId={params.contractId} edit={false} readOnly returnTo={backHref} />;
+  if (edit) return <ContractEditor contractId={params.contractId} edit returnTo={backHref} />;
+  if (loadedKey !== requestKey) return <main className="flex min-h-screen items-center justify-center"><LoaderCircle className="animate-spin" /></main>;
   if (error) return <main className="p-8 text-destructive">{error}</main>;
   if (!contract) return <main className="flex min-h-screen items-center justify-center"><LoaderCircle className="animate-spin" /></main>;
 
@@ -61,19 +87,7 @@ export default function ContractDetailPage() {
   const lines = contract.costLines ?? [];
   const subtotal = sumCostLines(lines);
   return <main className="min-h-screen bg-muted/30 p-4 sm:p-8"><div className="mx-auto flex max-w-6xl flex-col gap-6">
-    <header className="flex flex-wrap items-start justify-between gap-5 border-b border-border/70 pb-6">
-        <div>
-          <Link href="/contracts" className="inline-flex items-center gap-1 text-sm font-medium text-primary transition hover:underline"><ArrowLeft className="size-4" />Back to contracts</Link>
-          <p className="mt-5 text-xs font-bold uppercase tracking-[0.18em] text-primary">Contract record</p>
-          <h1 className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl">{contract.title || "Untitled contract"}</h1>
-          <p className="mt-2 text-sm text-muted-foreground">{contract.referenceNo || "No reference number"}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="outline" className={`rounded-full border-0 px-3 py-1 ${statusTones[contract.status]}`}>{labels[contract.status]}</Badge>
-          {(contract.status === "DRAFT" || contract.status === "RETURNED") && <Link href={`/contracts/${contract.id}?edit=1`} className={buttonVariants({ className: "rounded-xl" })}><Edit />Edit</Link>}
-          {authUser?.role === "ADMIN" && <button type="button" className={buttonVariants({ variant: "outline", className: "rounded-xl" })} disabled={generatingPdf} onClick={async () => { setGeneratingPdf(true); try { await generateFinalPdf(contract.id); setAttachmentRefresh((value) => value + 1); toast.success("Final PDF generated."); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "Could not generate PDF."); } finally { setGeneratingPdf(false); } }}>{generatingPdf ? <LoaderCircle className="animate-spin" /> : <FileDown />}Generate final PDF</button>}
-        </div>
-    </header>
+    <header className="flex flex-wrap items-start justify-between gap-4"><div><Link href={backHref} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="size-4" />Back</Link><h1 className="mt-2 text-2xl font-bold sm:text-3xl">{contract.title || "Untitled contract"}</h1><p className="text-sm text-muted-foreground">{contract.referenceNo || "No reference number"}</p></div><div className="flex items-center gap-2"><Badge>{labels[contract.status]}</Badge>{(contract.status === "DRAFT" || contract.status === "RETURNED") && <Link href={`/contracts/${contract.id}?edit=1&return=${encodeURIComponent(backHref)}`} className={buttonVariants()}><Edit />Edit</Link>}{contract.status === "APPROVED" && (authUser?.role === "ADMIN" || authUser?.role === "APPROVER") && <button type="button" className={buttonVariants({ variant: "outline" })} disabled={generatingPdf} onClick={async () => { setGeneratingPdf(true); try { await downloadFinalPdfPackage(contract.id, contract.referenceNo); setAttachmentRefresh((value) => value + 1); toast.success("Contract package downloaded."); } catch (caught) { toast.error(caught instanceof Error ? caught.message : "Could not download contract package."); } finally { setGeneratingPdf(false); } }}>{generatingPdf ? <LoaderCircle className="animate-spin" /> : <FileDown />}Generate Final PDF</button>}</div></header>
     <Card><CardHeader><CardTitle>Project and contract information</CardTitle></CardHeader><CardContent className="grid gap-5 md:grid-cols-3"><Info label="Department" value={contract.sponsorDepartment?.name ?? "—"} /><Info label="Category" value={contract.contractCategory?.name ?? "—"} /><Info label="Contract amount" value={`${contract.currency?.code ?? ""} ${contract.contractAmount ?? "—"}`} /><Info label="Estimated cost" value={`${contract.currency?.code ?? ""} ${subtotal}`} /><Info label="Created by" value={contract.createdBy?.fullName ?? "—"} /><Info label="Last updated" value={new Date(contract.updatedAt).toLocaleString()} /><Info label="Scope" value={contract.scope ?? "—"} wide /><Info label="Procurement rationale" value={contract.procurementRationale ?? "—"} wide /></CardContent></Card>
     <Card><CardHeader><CardTitle>Recommended bidder</CardTitle></CardHeader><CardContent className="space-y-2"><p className="text-lg font-semibold">{contract.recommendedBidder?.companyName || contract.recommendedBidder?.vendor?.name || "No bidder selected"}</p>{contract.recommendedBidder && <p className="text-sm text-muted-foreground">{[contract.recommendedBidder.contactPerson, contract.recommendedBidder.email, contract.recommendedBidder.phone].filter(Boolean).join(" · ") || "No contact details recorded."}</p>}<Info label="Selection rationale" value={contract.selectionRationale ?? "—"} /></CardContent></Card>
     <Card><CardHeader><CardTitle>Bidders, quotations and evaluations</CardTitle></CardHeader><CardContent className="space-y-4">{bidders.length === 0 ? <p className="text-sm text-muted-foreground">No bidders recorded.</p> : bidders.map((bidder) => <div key={bidder.id} className="rounded-lg border p-4"><div className="flex flex-wrap justify-between gap-3"><div><p className="font-semibold">{bidder.companyName || bidder.vendor?.name}</p><p className="text-sm text-muted-foreground">{[bidder.contactPerson, bidder.email, bidder.phone].filter(Boolean).join(" · ") || "No contact details recorded."}</p><p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{bidder.qualifications || "No qualifications recorded."}</p></div><Badge variant={bidder.id === contract.recommendedBidderId ? "default" : "outline"}>{bidder.id === contract.recommendedBidderId ? "Recommended" : "Bidder"}</Badge></div><div className="mt-4 grid gap-4 md:grid-cols-2"><div><h3 className="font-medium">Quotations</h3>{bidder.quotations.length === 0 ? <p className="text-sm text-muted-foreground">No quotations.</p> : bidder.quotations.map((quotation) => <p key={quotation.id} className="text-sm">{quotation.currency?.code ?? "—"} {quotation.quotedAmount}{quotation.notes ? ` — ${quotation.notes}` : ""}</p>)}</div><div><h3 className="font-medium">Evaluations</h3>{(contract.evaluations ?? []).filter((evaluation) => evaluation.bidderId === bidder.id).map((evaluation) => <p key={evaluation.id} className="text-sm">{evaluation.type === "TECHNICAL" ? "Technical" : "Commercial"}: {evaluation.score ?? "—"} — {evaluation.remarks || "No remarks."}</p>)}</div></div></div>)}</CardContent></Card>
