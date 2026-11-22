@@ -2,13 +2,11 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   ChevronLeft,
   ChevronRight,
   Eye,
-  LogOut,
   Pencil,
   Plus,
   RefreshCw,
@@ -55,7 +53,6 @@ import {
 } from "@/components/ui/table";
 import { ApiError } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
-import { logout } from "@/services/auth";
 import { deleteContract, listContracts } from "@/services/contracts";
 import type {
   Contract,
@@ -71,6 +68,13 @@ const statusLabels: Record<ContractStatus, string> = {
   RETURNED: "Returned",
   APPROVED: "Approved",
   REJECTED: "Rejected",
+};
+const statusTones: Record<ContractStatus, string> = {
+  DRAFT: "bg-sky-100 text-sky-800",
+  PENDING_APPROVAL: "bg-amber-100 text-amber-800",
+  RETURNED: "bg-orange-100 text-orange-800",
+  APPROVED: "bg-emerald-100 text-emerald-800",
+  REJECTED: "bg-rose-100 text-rose-800",
 };
 
 function formatAmount(contract: Contract): string {
@@ -92,7 +96,6 @@ function getErrorMessage(error: unknown): string {
 }
 
 export default function ContractsPage() {
-  const router = useRouter();
   const { authUser } = useAuth();
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [pagination, setPagination] = useState<PaginationMetadata>({
@@ -111,7 +114,6 @@ export default function ContractsPage() {
   const [deletionReason, setDeletionReason] = useState("");
   const [deletionConfirmed, setDeletionConfirmed] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const isAdmin = authUser?.role === "ADMIN";
 
   const loadContracts = useCallback(async () => {
@@ -192,55 +194,27 @@ export default function ContractsPage() {
     }
   }
 
-  async function handleLogout() {
-    setIsLoggingOut(true);
-    try {
-      await logout();
-      router.replace("/login");
-    } catch (logoutError) {
-      toast.error(
-        logoutError instanceof ApiError
-          ? logoutError.message
-          : "Could not sign out.",
-      );
-    } finally {
-      setIsLoggingOut(false);
-    }
-  }
-
   return (
     <main className="min-h-screen bg-muted/30 p-4 sm:p-6 lg:p-10">
       <div className="mx-auto flex max-w-7xl flex-col gap-6">
-        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        <section className="flex flex-wrap items-end justify-between gap-5 border-b border-border/70 pb-6">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">My forms</h1>
-            <p className="text-muted-foreground">
-              View and manage your contract forms.
-            </p>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Contract register</p>
+              <h1 className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl">My forms</h1>
+              <p className="mt-2 max-w-xl text-sm text-muted-foreground">Find a request, check its status, or continue working on a draft.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void handleLogout()}
-              disabled={isLoggingOut}
-            >
-              <LogOut data-icon="inline-start" />
-              {isLoggingOut ? "Signing out..." : "Sign out"}
-            </Button>
-            <Link href="/contracts/new" className={buttonVariants()}>
-              <Plus data-icon="inline-start" />
-              New contract
-            </Link>
+              <Link href="/contracts/new" className={buttonVariants({ className: "h-10 rounded-xl px-4" })}>
+                <Plus data-icon="inline-start" />
+                New contract
+              </Link>
           </div>
-        </div>
+        </section>
 
         <Card>
           <CardHeader>
-            <CardTitle>Contract register</CardTitle>
-            <CardDescription>
-              Search your forms and filter them by workflow status.
-            </CardDescription>
+            <CardTitle className="text-lg font-semibold">Contract register</CardTitle>
+            <CardDescription>Search by title or reference, or filter by workflow status.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <form
@@ -359,15 +333,7 @@ export default function ContractsPage() {
                             "—"}
                         </TableCell>
                         <TableCell>
-                          <Badge
-                            variant={
-                              contract.status === "REJECTED"
-                                ? "destructive"
-                                : contract.status === "DRAFT"
-                                  ? "secondary"
-                                  : "outline"
-                            }
-                          >
+                          <Badge variant="outline" className={`rounded-full border-0 px-2.5 font-medium ${statusTones[contract.status]}`}>
                             {statusLabels[contract.status]}
                           </Badge>
                         </TableCell>

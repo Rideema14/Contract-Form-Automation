@@ -7,9 +7,9 @@ export default function WorkspaceLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen flex flex-col bg-background">
+    <div className="min-h-screen bg-background">
       <WorkspaceHeader />
-      <div className="flex-1">
+      <div className="min-w-0 lg:pl-64">
         {children}
       </div>
     </div>

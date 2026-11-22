@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, LoaderCircle, Plus, Save, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -103,6 +103,8 @@ export function ContractEditor({ contractId, edit = true }: Props) {
   const [busy, setBusy] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const [error, setError] = useState("");
+  const contractIdRef = useRef(contractId);
+  const saveInProgressRef = useRef(false);
   const errors = useMemo(() => validate(values, attempted), [values, attempted]);
   const isEditable = edit && (!contract || contract.status === "DRAFT" || contract.status === "RETURNED");
 
@@ -140,17 +142,22 @@ export function ContractEditor({ contractId, edit = true }: Props) {
       recommendedVendorId: values.recommendedVendorId || null, selectionRationale: values.selectionRationale.trim() || null,
       recommendedBidderId: values.recommendedBidderId || null,
     };
-    const saved = contractId ? await updateContract(contractId, body) : await createContract(body);
+    const saved = contractIdRef.current
+      ? await updateContract(contractIdRef.current, body)
+      : await createContract(body);
+    contractIdRef.current = saved.id;
     setContract(saved);
     return saved;
   }
 
   async function save(submit = false) {
+    if (saveInProgressRef.current) return;
     setAttempted(submit);
     if (submit && Object.keys(errors).length) {
       toast.error("Complete the required contract fields.");
       return;
     }
+    saveInProgressRef.current = true;
     setBusy(true);
     try {
       const saved = await persistMain();
@@ -167,11 +174,12 @@ export function ContractEditor({ contractId, edit = true }: Props) {
         router.push(`/contracts/${saved.id}`);
       } else {
         toast.success("Draft saved.");
-        if (!contractId) window.history.replaceState(null, "", `/contracts/${saved.id}?edit=1`);
+        if (!contractId) router.replace(`/contracts/${saved.id}?edit=1`);
       }
     } catch (saveError) {
       toast.error(errorMessage(saveError, "Unable to save the contract."));
     } finally {
+      saveInProgressRef.current = false;
       setBusy(false);
     }
   }
@@ -322,7 +330,7 @@ export function ContractEditor({ contractId, edit = true }: Props) {
     });
   }
 
-  if (loading) return <main className="flex min-h-screen items-center justify-center"><LoaderCircle className="animate-spin" /></main>;
+  if (loading) return <main className="flex min-h-screen items-center justify-center"><LoaderCircle className="size-8 animate-spin text-primary" /></main>;
   if (error) return <main className="mx-auto max-w-3xl p-6 text-destructive">{error}</main>;
   if (!isEditable) return <main className="mx-auto max-w-3xl p-6"><p>This contract is no longer editable.</p><Link className="underline" href={`/contracts/${contractId}`}>View contract</Link></main>;
 
@@ -335,7 +343,31 @@ export function ContractEditor({ contractId, edit = true }: Props) {
   );
 
   return <main className="min-h-screen bg-muted/30 p-4 sm:p-8"><div className="mx-auto flex max-w-6xl flex-col gap-6">
-    <div className="flex flex-wrap items-center justify-between gap-4"><div><Link href="/contracts" className="text-sm text-muted-foreground"><ArrowLeft className="mr-1 inline size-4" />Back to register</Link><h1 className="mt-2 text-2xl font-bold">{contract ? "Edit contract" : "New contract"}</h1></div><div className="flex gap-2"><Button variant="outline" onClick={() => void save()} disabled={busy}><Save />Save draft</Button><Button onClick={() => void save(true)} disabled={busy}><Send />Submit</Button></div></div>
+    <div className="rounded-2xl border border-border/70 bg-card p-5 shadow-sm sm:p-7">
+      <div className="flex flex-wrap items-start justify-between gap-5">
+        <div>
+          <Link href="/contracts" className="inline-flex items-center gap-1 text-sm font-medium text-primary transition hover:underline"><ArrowLeft className="size-4" />Back to contracts</Link>
+          <p className="mt-5 text-xs font-bold uppercase tracking-[0.18em] text-primary">Contract workspace</p>
+          <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">{contract ? "Edit contract" : "Create a contract"}</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Add the project details, bidders and costs. Save a draft whenever you need; submit only when the request is ready for approval.</p>
+        </div>
+        <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+          <Button variant="outline" onClick={() => void save()} disabled={busy} className="rounded-xl">
+            {busy ? <LoaderCircle className="animate-spin" /> : <Save />}
+            {busy ? "Saving draft..." : contract ? "Save changes" : "Save draft"}
+          </Button>
+          <Button onClick={() => void save(true)} disabled={busy} className="rounded-xl">
+            <Send />
+            Submit for approval
+          </Button>
+        </div>
+      </div>
+      <div className="mt-6 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <span className="rounded-full bg-primary/10 px-3 py-1.5 font-medium text-primary">1. Project details</span>
+        <span className="rounded-full bg-muted px-3 py-1.5">2. Bidders and costs</span>
+        <span className="rounded-full bg-muted px-3 py-1.5">3. Review and submit</span>
+      </div>
+    </div>
     <Card><CardHeader><CardTitle>Project identification</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{input("title", "Project name / contract title")}{input("referenceNo", "Reference number")}<div className="md:col-span-2 space-y-2"><Label htmlFor="scope">Project description / scope of work</Label><Textarea id="scope" value={values.scope} onChange={(event) => setValue("scope", event.target.value)} aria-invalid={Boolean(errors.scope)} />{errors.scope && <p className="text-sm text-destructive">{errors.scope}</p>}</div></CardContent></Card>
     <Card><CardHeader><CardTitle>Contract information</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{select("sponsorDepartmentId", "Sponsor department", refs?.departments ?? [], "Select department")}{select("contractCategoryId", "Contract category", refs?.categories ?? [], "Select category")}<div className="md:col-span-2 space-y-2"><Label htmlFor="procurementRationale">Sourcing / procurement rationale</Label><Textarea id="procurementRationale" value={values.procurementRationale} onChange={(event) => setValue("procurementRationale", event.target.value)} aria-invalid={Boolean(errors.procurementRationale)} />{errors.procurementRationale && <p className="text-sm text-destructive">{errors.procurementRationale}</p>}</div></CardContent></Card>
     <Card><CardHeader><CardTitle>Financial and vendor information</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{input("contractAmount", "Estimated contract amount", "number")}{select("currencyId", "Currency", (refs?.currencies ?? []).map((item) => ({ id: item.id, name: `${item.code} - ${item.name}` })), "Select currency")}<div className="space-y-2"><Label htmlFor="recommendedBidderId">Recommended bidder</Label><select id="recommendedBidderId" className="h-9 w-full rounded-lg border bg-background px-2 text-sm" value={values.recommendedBidderId} onChange={(event) => { setValue("recommendedBidderId", event.target.value); setValue("recommendedVendorId", ""); }}><option value="">No recommendation</option>{bidders.map((bidder) => <option key={bidder.id} value={bidder.id}>{bidder.companyName || bidder.vendor?.name}</option>)}</select></div><div className="space-y-2"><Label htmlFor="selectionRationale">Selection rationale</Label><Textarea id="selectionRationale" value={values.selectionRationale} onChange={(event) => setValue("selectionRationale", event.target.value)} aria-invalid={Boolean(errors.selectionRationale)} />{errors.selectionRationale && <p className="text-sm text-destructive">{errors.selectionRationale}</p>}</div></CardContent></Card>

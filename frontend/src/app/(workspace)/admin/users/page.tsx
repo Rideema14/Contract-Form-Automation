@@ -39,7 +39,11 @@ export default function AdminUsersPage() {
   return (
     <main className="min-h-screen bg-muted/30 p-4 sm:p-8">
       <div className="mx-auto max-w-6xl space-y-6">
-        <div><h1 className="text-3xl font-bold">User administration</h1><p className="text-muted-foreground">Create users and manage roles and access.</p></div>
+        <section className="border-b border-border/70 pb-6">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Admin workspace</p>
+          <h1 className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl">User administration</h1>
+          <p className="mt-2 text-sm text-muted-foreground">Create accounts and manage access to the application.</p>
+        </section>
         <Card>
           <CardHeader><CardTitle>Create user</CardTitle></CardHeader>
           <CardContent>

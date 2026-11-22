@@ -76,29 +76,26 @@ export default function ApprovalsPage() {
 
   return (
     <div className="container mx-auto p-4 sm:p-6 space-y-6">
-      <div className="flex items-center justify-between">
+      <section className="flex flex-wrap items-end justify-between gap-4 border-b border-border/70 pb-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            Pending Approvals
-          </h1>
-          <p className="text-xs text-muted-foreground mt-1">
-            Contracts pending your review and decision in the approval workflow.
-          </p>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Approver workspace</p>
+            <h1 className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl">Pending approvals</h1>
+            <p className="mt-2 max-w-xl text-sm text-muted-foreground">
+              Review contract details and documents, then record your decision.
+            </p>
         </div>
-
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={fetchApprovals}
-          disabled={loading}
-          className="gap-1.5"
-        >
-          <RotateCcw
-            className={`size-3.5 ${loading ? "animate-spin" : ""}`}
-          />
-          <span>Refresh</span>
-        </Button>
-      </div>
+        <div>
+          <Button
+            variant="outline"
+            onClick={fetchApprovals}
+            disabled={loading}
+            className="rounded-xl"
+          >
+            <RotateCcw className={`size-4 ${loading ? "animate-spin" : ""}`} />
+            <span>Refresh queue</span>
+          </Button>
+        </div>
+      </section>
 
       {loading ? (
         <div className="flex flex-col items-center justify-center p-12 border rounded-xl bg-card text-muted-foreground gap-3">

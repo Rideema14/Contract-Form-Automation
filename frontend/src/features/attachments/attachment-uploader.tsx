@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { FileUp, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { uploadAttachments } from "./attachments-api";
 import type { Attachment, UploadableCategory, UploadLimits } from "./types";
@@ -56,10 +57,21 @@ export function AttachmentUploader({ formId, limits, onUploaded }: AttachmentUpl
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4 rounded-2xl border border-dashed border-primary/25 bg-primary/[0.035] p-4 sm:p-5">
+      <div className="flex items-start gap-3">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <Paperclip className="size-5" />
+        </span>
+        <div>
+          <h3 className="font-semibold">Add supporting documents</h3>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            Files are validated and stored privately. Choose a category and select one or more files.
+          </p>
+        </div>
+      </div>
       <select
         aria-label="Attachment category"
-        className="h-8 rounded-lg border border-border bg-background px-2 text-sm"
+        className="h-10 w-full rounded-xl border border-input bg-card px-3 text-sm shadow-sm outline-none focus-visible:ring-4 focus-visible:ring-ring/15"
         value={category}
         onChange={(event) => setCategory(event.target.value as UploadableCategory)}
         disabled={busy}
@@ -77,15 +89,23 @@ export function AttachmentUploader({ formId, limits, onUploaded }: AttachmentUpl
         accept={limits.allowedExtensions.map((extension) => `.${extension}`).join(",")}
         disabled={busy}
         onChange={(event) => setFiles(Array.from(event.target.files ?? []))}
+        className="w-full rounded-xl border border-input bg-card px-3 py-2 text-sm shadow-sm file:mr-3 file:rounded-lg file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-primary"
       />
-      <Button type="button" onClick={submit} disabled={busy || files.length === 0}>
-        {busy ? "Uploading..." : "Upload"}
-      </Button>
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
+      {files.length > 0 && (
+        <p className="text-xs font-medium text-muted-foreground" aria-live="polite">
+          {files.length} file{files.length === 1 ? "" : "s"} selected: {files.map((file) => file.name).join(", ")}
         </p>
-      ) : null}
+      )}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-muted-foreground">
+          Allowed: {limits.allowedExtensions.map((extension) => `.${extension}`).join(", ")}
+        </p>
+        <Button type="button" onClick={submit} disabled={busy || files.length === 0} className="h-10 rounded-xl px-5">
+          <FileUp className="size-4" />
+          {busy ? "Uploading..." : "Upload files"}
+        </Button>
+      </div>
+      {error ? <p role="alert" className="rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">{error}</p> : null}
     </div>
   );
 }

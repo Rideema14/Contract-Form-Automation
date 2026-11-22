@@ -20,7 +20,11 @@ export default function AdminReferenceDataPage() {
   return (
     <main className="min-h-screen bg-muted/30 p-4 sm:p-8">
       <div className="mx-auto max-w-6xl space-y-6">
-        <div><h1 className="text-3xl font-bold">Reference data</h1><p className="text-muted-foreground">Departments, categories, currencies and vendors used by contract forms.</p></div>
+        <section className="border-b border-border/70 pb-6">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Admin workspace</p>
+          <h1 className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl">Reference data</h1>
+          <p className="mt-2 text-sm text-muted-foreground">Departments, categories, currencies, and vendors used by contract forms.</p>
+        </section>
         {error && <p className="text-destructive">{error}</p>}
         {data && (
           <div className="grid gap-4 lg:grid-cols-2">

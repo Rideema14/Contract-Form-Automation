@@ -1,3 +1,4 @@
+import process from 'node:process';
 import 'dotenv/config';
 import bcrypt from 'bcryptjs';
 import { UserRole } from '@prisma/client';
@@ -28,36 +29,117 @@ function assertLocalDevelopmentDatabase(): void {
   }
 }
 
-async function main(): Promise<void> {
-  assertLocalDevelopmentDatabase();
+interface TestUserDefinition {
+  fullName: string;
+  email: string;
+  password: string;
+  role: UserRole;
+}
 
+async function createOrUpdateUser(userDef: TestUserDefinition, defaultDepartmentId?: string): Promise<void> {
   const parsed = loginSchema.safeParse({
-    email: process.env.TEST_USER_EMAIL,
-    password: process.env.TEST_USER_PASSWORD,
+    email: userDef.email,
+    password: userDef.password,
   });
+
   if (!parsed.success) {
-    throw new Error('TEST_USER_EMAIL and TEST_USER_PASSWORD must be valid environment variables.');
+    throw new Error(`Invalid credentials for ${userDef.email}: ${parsed.error.message}`);
   }
 
   const { email, password } = parsed.data;
   const existingUser = await prisma.user.findUnique({ where: { email } });
+  const passwordHash = await bcrypt.hash(password, 12);
+
   if (existingUser) {
-    console.log('The local test user already exists; no changes were made.');
-    return;
+    await prisma.user.update({
+      where: { id: existingUser.id },
+      data: {
+        passwordHash,
+        fullName: userDef.fullName,
+        role: userDef.role,
+        isActive: true,
+        departmentId: existingUser.departmentId ?? defaultDepartmentId,
+      },
+    });
+    console.log(`- Verified/updated existing ${userDef.role} user: ${email}`);
+  } else {
+    await prisma.user.create({
+      data: {
+        fullName: userDef.fullName,
+        email,
+        passwordHash,
+        role: userDef.role,
+        isActive: true,
+        departmentId: defaultDepartmentId,
+      },
+    });
+    console.log(`- Created new ${userDef.role} user: ${email}`);
+  }
+}
+
+async function main(): Promise<void> {
+  assertLocalDevelopmentDatabase();
+
+  const defaultDepartment = await prisma.department.findFirst();
+  const departmentId = defaultDepartment?.id;
+
+  const usersToCreate: TestUserDefinition[] = [
+    {
+      fullName: 'Local Test Submitter',
+      email: 'submitter@example.com',
+      password: 'Password123!',
+      role: UserRole.SUBMITTER,
+    },
+    {
+      fullName: 'Local Test Approver',
+      email: 'approver@example.com',
+      password: 'Password123!',
+      role: UserRole.APPROVER,
+    },
+    {
+      fullName: 'Local Test Admin',
+      email: 'admin@example.com',
+      password: 'Password123!',
+      role: UserRole.ADMIN,
+    },
+  ];
+
+  const envEmail = process.env.TEST_USER_EMAIL?.trim();
+  const envPassword = process.env.TEST_USER_PASSWORD?.trim();
+
+  if (envEmail && envPassword) {
+    const rawRole = (process.env.TEST_USER_ROLE?.trim().toUpperCase() || 'SUBMITTER') as UserRole;
+    const role = Object.values(UserRole).includes(rawRole) ? rawRole : UserRole.SUBMITTER;
+
+    const existingIndex = usersToCreate.findIndex((u) => u.email.toLowerCase() === envEmail.toLowerCase());
+    const customUser: TestUserDefinition = {
+      fullName: process.env.TEST_USER_NAME?.trim() || `Local Test ${role}`,
+      email: envEmail,
+      password: envPassword,
+      role,
+    };
+    if (existingIndex >= 0) {
+      usersToCreate[existingIndex] = customUser;
+    } else {
+      usersToCreate.push(customUser);
+    }
   }
 
-  const passwordHash = await bcrypt.hash(password, 12);
-  await prisma.user.create({
-    data: {
-      fullName: 'Local Test Submitter',
-      email,
-      passwordHash,
-      role: UserRole.SUBMITTER,
-      isActive: true,
-    },
-  });
+  console.log('--- Setting up Local Test Users ---');
+  for (const userDef of usersToCreate) {
+    await createOrUpdateUser(userDef, departmentId);
+  }
 
-  console.log('Local Submitter test user created.');
+  console.log('\n======================================================');
+  console.log('           Local Test Users Ready to Use');
+  console.log('======================================================');
+  for (const userDef of usersToCreate) {
+    console.log(`Role:     ${userDef.role}`);
+    console.log(`Name:     ${userDef.fullName}`);
+    console.log(`Email:    ${userDef.email}`);
+    console.log(`Password: ${userDef.password}`);
+    console.log('------------------------------------------------------');
+  }
 }
 
 main()

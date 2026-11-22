@@ -19,7 +19,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 
-export function NotificationBell() {
+export function NotificationBell({ className = '' }: { className?: string }) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -110,7 +110,7 @@ export function NotificationBell() {
         variant="ghost"
         size="icon"
         onClick={handleToggle}
-        className="relative"
+        className={`relative ${className}`}
         aria-label="Notifications"
         title="Notifications"
       >
