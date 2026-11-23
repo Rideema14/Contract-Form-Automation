@@ -455,6 +455,9 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
       if (saved.status === "DRAFT" || saved.status === "RETURNED") {
         void getAttachmentLimits(saved.id).then(setAttachmentLimits).catch(() => setAttachmentLimits(null));
       }
+      setValues((current) => current.referenceNo
+        ? current
+        : { ...current, referenceNo: saved.referenceNo ?? "" });
       setSaveState("All changes saved");
       setContract(saved);
       return saved;
@@ -752,48 +755,57 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
   if (!isEditable) return <main className="mx-auto max-w-3xl p-6"><p>This contract is no longer editable.</p><Link className="underline" href={`/contracts/${contractId}`}>View contract</Link></main>;
 
   type FieldKey = Extract<keyof FormValues, string>;
-  const input = (key: FieldKey, label: string, type = "text") => (
-    <div className="space-y-2"><Label htmlFor={key}>{label}</Label><Input id={key} type={type} value={values[key]} onChange={(event) => setValue(key, event.target.value)} aria-invalid={Boolean(errors[key])} />{errors[key] && <p className="text-sm text-destructive">{errors[key]}</p>}</div>
+  const input = (key: FieldKey, label: string, type = "text", readOnly = false) => (
+    <div className="space-y-2"><Label htmlFor={key}>{label}</Label><Input id={key} type={type} value={values[key]} readOnly={readOnly} onChange={(event) => setValue(key, event.target.value)} aria-invalid={Boolean(errors[key])} />{readOnly && <p className="text-xs text-muted-foreground">Generated automatically when the draft is first saved.</p>}{errors[key] && <p className="text-sm text-destructive">{errors[key]}</p>}</div>
   );
   const select = (key: FieldKey, label: string, options: { id: string; name: string }[], empty: string) => (
     <div className="space-y-2"><Label htmlFor={key}>{label}</Label><select id={key} className="h-9 w-full rounded-lg border bg-background px-2 text-sm" value={values[key]} onChange={(event) => setValue(key, event.target.value)}><option value="">{empty}</option>{options.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}</select>{errors[key] && <p className="text-sm text-destructive">{errors[key]}</p>}</div>
   );
-
   return <main className="min-h-screen bg-muted/30 p-4 sm:p-8"><div className="mx-auto flex max-w-6xl flex-col gap-6">
     <div className="flex flex-wrap items-center justify-between gap-4"><div><Link href={returnTo} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="size-4" />Back</Link><h1 className="mt-2 text-2xl font-bold">{contract ? "Edit contract" : "New contract"}</h1><p className={saveState === "Unable to save. Retry." ? "mt-1 text-sm text-destructive" : "mt-1 text-sm text-muted-foreground"}>{saveState}</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => void save()} disabled={busy || attachmentsUploading || saveInFlight.current !== null}><Save />Save draft</Button><Button onClick={() => void save(true)} disabled={busy || attachmentsUploading || preDraftUploadsPending || saveInFlight.current !== null}><Send />Submit</Button></div></div>
     {attempted && Object.keys(errors).length > 0 && <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive"><p className="font-semibold">Complete these items before submitting:</p><ul className="mt-2 list-inside list-disc space-y-1">{Object.entries(errors).map(([field, message]) => <li key={field}>{message}</li>)}</ul></div>}
-    <Card className="order-1"><CardHeader><CardTitle>Project identification</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{input("title", "Project name / contractor / contract title")}{input("referenceNo", "Reference number")}</CardContent></Card>
+    <Card className="order-1"><CardHeader><CardTitle>Project identification</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{input("title", "Project name / contractor / contract title")}{input("referenceNo", "Reference number", "text", true)}</CardContent></Card>
     <Card className="order-2"><CardHeader><CardTitle>Project Description</CardTitle></CardHeader><CardContent><div className="space-y-2"><Label htmlFor="scope">Scope of work</Label><Textarea id="scope" value={values.scope} onChange={(event) => setValue("scope", event.target.value)} aria-invalid={Boolean(errors.scope)} />{errors.scope && <p className="text-sm text-destructive">{errors.scope}</p>}</div></CardContent></Card>
     <Card className="order-3"><CardHeader><CardTitle>Contract information</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{select("sponsorDepartmentId", "Sponsor department", refs?.departments ?? [], "Select department")}{select("contractCategoryId", "Contract category", refs?.categories ?? [], "Select category")}<div className="md:col-span-2 space-y-2"><Label htmlFor="procurementRationale">Sourcing / procurement rationale</Label><Textarea id="procurementRationale" value={values.procurementRationale} onChange={(event) => setValue("procurementRationale", event.target.value)} aria-invalid={Boolean(errors.procurementRationale)} />{errors.procurementRationale && <p className="text-sm text-destructive">{errors.procurementRationale}</p>}</div></CardContent></Card>
     <Card className="order-5"><CardHeader><CardTitle>Financial and vendor information</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{input("contractAmount", "Estimated contract amount", "number")}{select("currencyId", "Currency", (refs?.currencies ?? []).map((item) => ({ id: item.id, name: `${item.code} - ${item.name}` })), "Select currency")}<div className="space-y-2"><Label htmlFor="recommendedBidderId">Recommended bidder</Label><select id="recommendedBidderId" className="h-9 w-full rounded-lg border bg-background px-2 text-sm" value={values.recommendedBidderId} onChange={(event) => { setValue("recommendedBidderId", event.target.value); setValue("recommendedVendorId", ""); }}><option value="">No recommendation</option>{bidders.map((bidder) => <option key={bidder.id} value={bidder.id}>{bidder.companyName || bidder.vendor?.name}</option>)}</select>{bidders.length === 0 && <p className="text-sm text-muted-foreground">Please add a bidder in Bidder Management before selecting a recommended bidder.</p>}</div><div className="space-y-2"><Label htmlFor="selectionRationale">Selection rationale</Label><Textarea id="selectionRationale" value={values.selectionRationale} onChange={(event) => setValue("selectionRationale", event.target.value)} aria-invalid={Boolean(errors.selectionRationale)} />{errors.selectionRationale && <p className="text-sm text-destructive">{errors.selectionRationale}</p>}</div></CardContent></Card>
     <Card className="order-4">
       <CardHeader><CardTitle>Bidder Management</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        <div className="space-y-3">
-          <div className="space-y-2">
-            <Label htmlFor="company-selection">Company</Label>
-            <select
-              id="company-selection"
-              className="h-10 w-full rounded-lg border bg-background px-3 text-sm"
-              value={companySelection}
-              onChange={(event) => {
-                const selection = event.target.value;
-                setCompanySelection(selection);
-                if (selection === "__new__") setNewVendor("");
-                else if (selection) {
-                  setNewVendor(selection);
-                  setNewCompany(emptyCompanyDetails);
-                } else {
-                  setNewVendor("");
-                }
-              }}
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+            <div className="space-y-2">
+              <Label htmlFor="company-selection">Company</Label>
+              <select
+                id="company-selection"
+                className="h-10 w-full rounded-lg border bg-background px-3 text-sm"
+                value={companySelection}
+                onChange={(event) => {
+                  const selection = event.target.value;
+                  setCompanySelection(selection);
+                  if (selection === "__new__") setNewVendor("");
+                  else if (selection) {
+                    setNewVendor(selection);
+                    setNewCompany(emptyCompanyDetails);
+                  } else {
+                    setNewVendor("");
+                  }
+                }}
+              >
+                <option value="">Select Company</option>
+                {(refs?.vendors ?? [])
+                  .filter((vendor) => !bidders.some((bidder) => bidder.vendorId === vendor.id))
+                  .map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
+                <option value="__new__">New Company</option>
+              </select>
+            </div>
+            <Button
+              size="lg"
+              className="h-10 w-full sm:w-auto sm:min-w-36"
+              onClick={() => void addBidder()}
+              disabled={!companySelection}
             >
-              <option value="">Select Company</option>
-              {(refs?.vendors ?? [])
-                .filter((vendor) => !bidders.some((bidder) => bidder.vendorId === vendor.id))
-                .map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
-              <option value="__new__">New Company</option>
-            </select>
+              <Plus />Add bidder
+            </Button>
           </div>
           {companySelection === "__new__" && (
             <CompanyDetailsFields
@@ -820,8 +832,7 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
             );
           })()}
         </div>
-        <Button onClick={() => void addBidder()} disabled={!companySelection}><Plus />Add Bidder</Button>
-        {bidders.length === 0 && <p className="text-sm text-muted-foreground">No bidders added yet. Save the draft to add a bidder.</p>}
+        {bidders.length === 0 && <p className="text-sm text-muted-foreground">Choose a company above and select Add bidder to get started.</p>}
         {bidders.map((bidder) => {
           const draft = quotationDrafts[bidder.id] ?? { amount: "", notes: "" };
           return <div key={bidder.id} className="space-y-4 rounded-lg border p-4">
@@ -832,7 +843,7 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
             <div>
               <h3 className="mb-2 font-medium">Quotations</h3>
               {bidder.quotations.length === 0 ? <p className="text-sm text-muted-foreground">No quotations.</p> : <div className="space-y-2">{bidder.quotations.map((quotation) => <div key={quotation.id} className="flex flex-wrap items-center justify-between gap-2 rounded bg-muted/50 p-2 text-sm"><span>{quotation.currency?.code ?? "—"} {quotation.quotedAmount}{quotation.notes ? ` — ${quotation.notes}` : ""}</span><span className="flex gap-1"><Button size="sm" variant="ghost" onClick={() => void editQuotation(bidder, quotation)}>Edit</Button><Button size="sm" variant="ghost" className="text-destructive" onClick={() => void removeQuotation(bidder, quotation.id)}>Remove</Button></span></div>)}</div>}
-              <div className="mt-2 flex flex-col gap-2 sm:flex-row"><Input type="number" placeholder="Quoted amount" value={draft.amount} onChange={(event) => setQuotationDrafts((current) => ({ ...current, [bidder.id]: { ...draft, amount: event.target.value } }))} /><Input placeholder="Quotation description / notes" value={draft.notes} onChange={(event) => setQuotationDrafts((current) => ({ ...current, [bidder.id]: { ...draft, notes: event.target.value } }))} /><Button variant="outline" onClick={() => void addQuotation(bidder)}>Add quotation</Button></div>
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row"><Input type="number" placeholder="Quoted amount" value={draft.amount} onChange={(event) => setQuotationDrafts((current) => ({ ...current, [bidder.id]: { ...draft, amount: event.target.value } }))} /><Input placeholder="Quotation description / notes" value={draft.notes} onChange={(event) => setQuotationDrafts((current) => ({ ...current, [bidder.id]: { ...draft, notes: event.target.value } }))} /><Button size="lg" variant="outline" className="h-10 sm:flex-none" onClick={() => void addQuotation(bidder)}><Plus />Add quotation</Button></div>
             </div>
             <div>
               <h3 className="mb-2 font-medium">Evaluations</h3>
@@ -855,7 +866,56 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
     </Card>
     <Card className="order-7"><CardHeader><CardTitle>Supporting documents</CardTitle></CardHeader><CardContent className="space-y-4"><AttachmentUploader formId={activeContractId} limits={attachmentLimits} onUploaded={() => setAttachmentRefresh((value) => value + 1)} onUploadStateChange={setAttachmentsUploading} onPreDraftPendingChange={updatePreDraftUploadsPending} />{activeContractId && <AttachmentList formId={activeContractId} refreshKey={attachmentRefresh} />}</CardContent></Card>
     <Card className="order-8"><CardHeader><CardTitle>Approval Workflow</CardTitle></CardHeader><CardContent className="space-y-2"><p className="text-sm text-muted-foreground">Select the employees responsible for reviewing and approving this contract. Approvals will follow the sequence specified below.</p><Label htmlFor="contract-approver-search">Select an Approver</Label><ApproverSelect inputId="contract-approver-search" value={approverIds} onChange={setApproverIds} /></CardContent></Card>
-    <Card className="order-9"><CardHeader><CardTitle>Budget and cost information</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-muted-foreground">Tax is not configured; tax is 0.00.</p>{costLines.map((line) => <div key={line.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2 text-sm"><span>{line.description}: {line.quantity} × {line.unitCost} = {line.amount}</span><span><Button size="sm" variant="ghost" onClick={() => setCostDraft({ id: line.id, description: line.description, quantity: line.quantity ?? "", unitCost: line.unitCost ?? "", amount: line.amount })}>Edit</Button><Button size="sm" variant="ghost" className="text-destructive" onClick={() => void removeCostLine(line)}>Remove</Button></span></div>)}<div className="grid gap-2 md:grid-cols-4"><Input placeholder="Description" value={costDraft.description} onChange={(event) => setCostDraft({ ...costDraft, description: event.target.value })} /><Input placeholder="Quantity" min="0" type="number" value={costDraft.quantity} onChange={(event) => { const quantity = event.target.value; setCostDraft({ ...costDraft, quantity, amount: quantity && costDraft.unitCost ? calculatedAmount(quantity, costDraft.unitCost) : "" }); }} /><Input placeholder="Unit cost" min="0" type="number" value={costDraft.unitCost} onChange={(event) => { const unitCost = event.target.value; setCostDraft({ ...costDraft, unitCost, amount: costDraft.quantity && unitCost ? calculatedAmount(costDraft.quantity, unitCost) : "" }); }} /><div className="flex gap-2"><Input readOnly placeholder="Calculated amount" value={costDraft.amount} /><Button variant="outline" onClick={() => void saveCostLine()}><Plus /></Button></div></div><div className="flex justify-end gap-6 border-t pt-3 text-sm"><span>Subtotal: {costTotal(costLines)}</span><span>Tax: 0.0000</span><strong>Total: {costTotal(costLines)}</strong></div></CardContent></Card>
+    <Card className="order-9">
+      <CardHeader><CardTitle>Budget and cost information</CardTitle></CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-muted-foreground">Tax is not configured; tax is 0.00.</p>
+        {costLines.map((line) => (
+          <div key={line.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2 text-sm">
+            <span>{line.description}: {line.quantity} × {line.unitCost} = {line.amount}</span>
+            <span>
+              <Button size="sm" variant="ghost" onClick={() => setCostDraft({ id: line.id, description: line.description, quantity: line.quantity ?? "", unitCost: line.unitCost ?? "", amount: line.amount })}>Edit</Button>
+              <Button size="sm" variant="ghost" className="text-destructive" onClick={() => void removeCostLine(line)}>Remove</Button>
+            </span>
+          </div>
+        ))}
+        <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
+          <div>
+            <p className="font-medium">{costDraft.id ? "Edit cost item" : "Add a cost item"}</p>
+            <p className="mt-1 text-sm text-muted-foreground">Enter a description, quantity, and unit cost. The amount is calculated automatically.</p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="space-y-2">
+              <Label htmlFor="cost-description">Description</Label>
+              <Input id="cost-description" placeholder="e.g. Installation services" value={costDraft.description} onChange={(event) => setCostDraft({ ...costDraft, description: event.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="cost-quantity">Quantity</Label>
+              <Input id="cost-quantity" placeholder="Enter quantity" min="0" type="number" value={costDraft.quantity} onChange={(event) => { const quantity = event.target.value; setCostDraft({ ...costDraft, quantity, amount: quantity && costDraft.unitCost ? calculatedAmount(quantity, costDraft.unitCost) : "" }); }} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="cost-unit-cost">Unit cost</Label>
+              <Input id="cost-unit-cost" placeholder="Enter unit cost" min="0" type="number" value={costDraft.unitCost} onChange={(event) => { const unitCost = event.target.value; setCostDraft({ ...costDraft, unitCost, amount: costDraft.quantity && unitCost ? calculatedAmount(costDraft.quantity, unitCost) : "" }); }} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="cost-amount">Calculated amount</Label>
+              <Input id="cost-amount" readOnly placeholder="Calculated automatically" value={costDraft.amount} />
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <Button size="lg" className="h-10 w-full sm:w-auto" onClick={() => void saveCostLine()}>
+              {costDraft.id ? <Save /> : <Plus />}
+              {costDraft.id ? "Save cost item" : "Add cost item"}
+            </Button>
+          </div>
+        </div>
+        <div className="flex flex-wrap justify-end gap-x-6 gap-y-1 border-t pt-3 text-sm">
+          <span>Subtotal: {costTotal(costLines)}</span>
+          <span>Tax: 0.0000</span>
+          <strong>Total: {costTotal(costLines)}</strong>
+        </div>
+      </CardContent>
+    </Card>
     <DynamicFormSections
       definition={formSchema?.definition}
       values={dynamicValues}

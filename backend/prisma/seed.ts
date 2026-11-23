@@ -1,6 +1,11 @@
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 
+declare const process: {
+  env: Record<string, string | undefined>;
+  exitCode?: number;
+};
+
 const prisma = new PrismaClient();
 const LOCAL_DATABASE_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 

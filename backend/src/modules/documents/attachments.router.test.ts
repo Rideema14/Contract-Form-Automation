@@ -18,11 +18,13 @@ const OTHER_FORM = '22222222-2222-4222-8222-222222222222';
 
 class FakeDrive implements DriveStorage {
   files = new Map<string, Buffer>();
+  folderNames: string[] = [];
   private n = 0;
-  async upload({ body }: { name: string; mimeType: string; body: Readable }) {
+  async upload({ body, contractFolderName }: Parameters<DriveStorage['upload']>[0]) {
     const chunks: Buffer[] = [];
     for await (const c of body) chunks.push(Buffer.from(c));
     const id = `drive-${++this.n}`;
+    this.folderNames.push(contractFolderName);
     this.files.set(id, Buffer.concat(chunks));
     return { driveFileId: id };
   }
@@ -69,6 +71,7 @@ function app() {
         if (formId !== FORM) throw new AppError(403, 'FORBIDDEN', 'not allowed');
         if (user.id === 'outsider') throw new AppError(403, 'FORBIDDEN', 'not allowed');
       },
+      getContractFolderName: async () => 'CF-2026-0001 - Office Renovation - 11111111',
       upload: createDocumentUploadMiddleware(config, 'files'),
       generatePackage: async (formId) => {
         packageCalls.push(formId);
@@ -103,6 +106,7 @@ describe('attachments router', () => {
     expect(item).toMatchObject({ fileName: 'quote.pdf', category: 'SUPPORTING', mimeType: PDF, uploadedById: 'owner' });
     expect(item.driveFileId).toBeUndefined();
     expect(drive.files.size).toBe(1);
+    expect(drive.folderNames).toEqual(['CF-2026-0001 - Office Renovation - 11111111']);
 
     const list = await request(a).get(`/api/forms/${FORM}/attachments`).set({ 'x-user': 'viewer:APPROVER' });
     expect(list.body.data).toHaveLength(1);

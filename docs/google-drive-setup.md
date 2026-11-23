@@ -17,6 +17,11 @@ Download: backend checks access again. A Drive File ID alone is not authorizatio
 
 The backend creates/reuses one child folder per contract under the app-owned/configured root. It does not create public permissions. Files are downloaded through authorized backend routes; the Drive ID is never returned to the browser.
 
+Contract folders use the contract reference number as their name. New references are assigned when
+a draft is first saved, before supporting files can be uploaded. Existing UUID-named folders are
+renamed in place the next time a file is uploaded or the final PDF is stored. Uploaded supporting
+document filenames remain intact inside that folder; generated final PDFs use the reference number.
+
 ## Rules
 - A public API key is not sufficient for private uploads. Never set files to "Anyone with the link".
 - Never put credentials in the frontend or in `NEXT_PUBLIC_` variables.

@@ -89,6 +89,33 @@ export function sanitizeFilename(
   return `${safeBase}${extPart}`;
 }
 
+/** Builds a readable, collision-resistant Google Drive folder name for a contract. */
+export function buildContractDriveFolderName(
+  formId: string,
+  title: string | null,
+  referenceNo: string | null
+): string {
+  const cleanLabel = (value: string): string =>
+    value
+      .normalize('NFKC')
+      .replace(/[\p{Cc}\p{Cf}]/gu, '')
+      .replace(/[\\/]/g, '-')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/^[. ]+|[. ]+$/g, '');
+
+  const idSuffix = formId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8) || 'contract';
+  const reference = referenceNo ? cleanLabel(referenceNo) : '';
+  if (reference) return Array.from(reference).slice(0, 180).join('');
+
+  const titleLabel = cleanLabel(title ?? '') || 'Contract';
+  const suffix = reference ? '' : ` - ${idSuffix}`;
+  const titleBudget = Math.max(1, 180 - suffix.length);
+  const shortenedTitle = Array.from(titleLabel).slice(0, titleBudget).join('').trim();
+
+  return `${shortenedTitle || 'Contract'}${suffix}`;
+}
+
 /** "report.pdf" + 2 -> "report_2.pdf", keeping the result within maxBytes. */
 function withSuffix(filename: string, n: number, maxBytes: number): string {
   const { base, ext } = splitFilename(filename);

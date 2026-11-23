@@ -16,4 +16,19 @@ describe('Contract Forms API', () => {
 
     expect(response.status).toBe(404);
   });
+
+  it('should return a structured 400 for malformed JSON', async () => {
+    const response = await request(app)
+      .post('/api/auth/login')
+      .set('Content-Type', 'application/json')
+      .send('{"email":');
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({
+      success: false,
+      message: 'Invalid JSON request body',
+      error: { code: 'INVALID_JSON' },
+      meta: { requestId: expect.any(String) },
+    });
+  });
 });

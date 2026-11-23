@@ -413,11 +413,22 @@ describe('contract service authorization and persistence', () => {
       definition: { sections: [] },
       publishedAt: new Date(),
     } as never);
-    const create = vi.spyOn(prisma.contractForm, 'create').mockResolvedValue({
+    const create = vi.fn().mockResolvedValue({
       id: 'form-1',
       status: ContractStatus.DRAFT,
       createdById: submitter.id,
-    } as never);
+    });
+    const year = new Date().getUTCFullYear();
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      contractForm: {
+        findMany: vi.fn().mockResolvedValue([{ referenceNo: `CF-${year}-0003` }]),
+        create,
+      },
+    };
+    vi.spyOn(prisma, '$transaction').mockImplementation(
+      async (callback) => callback(tx as never) as never,
+    );
 
     await createDraft(submitter, {
       title: 'Draft',
@@ -431,11 +442,10 @@ describe('contract service authorization and persistence', () => {
           status: ContractStatus.DRAFT,
           formSchemaVersionId: 'schema-v2',
           dynamicValues: {},
+          referenceNo: `CF-${year}-0004`,
         }),
       }),
     );
-
-    create.mockRestore();
   });
 
   it('rejects a stale published version when creating a contract', async () => {
@@ -616,6 +626,40 @@ describe('contract service authorization and persistence', () => {
 
     detail.mockRestore();
     findUnique.mockRestore();
+  });
+
+  it('assigns a reference number when loading a legacy draft without one', async () => {
+    const year = new Date().getUTCFullYear();
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: submitter.id,
+      status: ContractStatus.DRAFT,
+      referenceNo: null,
+    } as never);
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      contractForm: {
+        findUnique: vi.fn().mockResolvedValue({ referenceNo: null }),
+        findMany: vi.fn().mockResolvedValue([]),
+        updateMany,
+      },
+    };
+    vi.spyOn(prisma, '$transaction').mockImplementation(
+      async (callback) => callback(tx as never) as never,
+    );
+    vi.spyOn(prisma.contractForm, 'findUniqueOrThrow').mockResolvedValue({
+      id: 'form-1',
+      referenceNo: `CF-${year}-0001`,
+    } as never);
+
+    await expect(getContract('form-1', submitter)).resolves.toMatchObject({
+      referenceNo: `CF-${year}-0001`,
+    });
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'form-1', referenceNo: null },
+      data: { referenceNo: `CF-${year}-0001` },
+    });
   });
 
   it('allows an administrator to access another user contract', async () => {

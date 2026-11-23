@@ -10,12 +10,14 @@ import { DocumentService } from './document.service';
 
 class FakeDrive implements DriveStorage {
   files = new Map<string, string>();
+  folderNames: string[] = [];
   failOnUploadNumber = 0;
   private n = 0;
-  async upload() {
+  async upload(input: Parameters<DriveStorage['upload']>[0]) {
     this.n++;
     if (this.n === this.failOnUploadNumber) throw new Error('drive down');
     const id = `d${this.n}`;
+    this.folderNames.push(input.contractFolderName);
     this.files.set(id, 'x');
     return { driveFileId: id };
   }
@@ -39,16 +41,23 @@ async function tempFile(name: string) {
   await fs.writeFile(p, 'content');
   return { path: p, originalname: name, mimetype: 'application/pdf', size: 7 };
 }
-const base = { contractFormId: 'c1', category: 'SUPPORTING' as const, uploadedById: 'u1' };
+const base = {
+  contractFormId: 'c1',
+  contractFolderName: 'Office Renovation - c1',
+  category: 'SUPPORTING' as const,
+  uploadedById: 'u1',
+};
 
 describe('DocumentService', () => {
   it('sanitises names and resolves duplicates, including within one batch', async () => {
     const repo = new InMemoryAttachmentRepository();
-    const svc = new DocumentService({ drive: new FakeDrive(), repository: repo });
+    const drive = new FakeDrive();
+    const svc = new DocumentService({ drive, repository: repo });
     const a = await tempFile('my quote.pdf');
     const records = await svc.uploadAttachments({ ...base, files: [a, a] });
     expect(records.map((r) => r.fileName)).toEqual(['my_quote.pdf', 'my_quote_1.pdf']);
-      });
+    expect(drive.folderNames).toEqual(['Office Renovation - c1', 'Office Renovation - c1']);
+  });
 
   it('rolls back Drive files and records when a later upload fails', async () => {
     const drive = new FakeDrive();
@@ -166,7 +175,10 @@ describe('DocumentService', () => {
     const repo = new InMemoryAttachmentRepository();
     const svc = new DocumentService({ drive: new FakeDrive(), repository: repo });
     const rec = await svc.storeGeneratedFile({
-      contractFormId: 'c1', category: 'GENERATED_PDF', uploadedById: 'system',
+      contractFormId: 'c1',
+      contractFolderName: 'CTR-2026-0001 - Office Renovation - c1',
+      category: 'GENERATED_PDF',
+      uploadedById: 'system',
       fileName: 'Final Contract.pdf', mimeType: 'application/pdf', content: Buffer.from('%PDF-x'),
     });
     expect(rec.fileName).toBe('Final_Contract.pdf');

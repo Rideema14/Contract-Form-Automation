@@ -54,6 +54,7 @@ export class DocumentService {
    */
   async uploadAttachments(input: {
     contractFormId: string;
+    contractFolderName: string;
     category: UserUploadCategory;
     uploadedById: string;
     files: UploadedFile[];
@@ -91,6 +92,7 @@ export class DocumentService {
           mimeType: file.mimetype,
           body: createReadStream(file.path),
           contractFormId: input.contractFormId,
+          contractFolderName: input.contractFolderName,
         });
         driveFileIds.push(driveFileId);
         created.push(
@@ -184,6 +186,7 @@ export class DocumentService {
   /** System use (final PDF): stores a buffer as an attachment. */
   async storeGeneratedFile(input: {
     contractFormId: string;
+    contractFolderName: string;
     category: AttachmentCategory;
     uploadedById: string;
     fileName: string;
@@ -198,6 +201,7 @@ export class DocumentService {
       mimeType: input.mimeType,
       body: Readable.from(input.content),
       contractFormId: input.contractFormId,
+      contractFolderName: input.contractFolderName,
     });
     try {
       return await repository.create({

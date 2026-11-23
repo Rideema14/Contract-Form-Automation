@@ -16,6 +16,7 @@ import {
   documentService,
   generateFinalPdfPackage,
 } from '../modules/documents/documents.runtime';
+import { buildContractDriveFolderName } from '../modules/documents/file.utils';
 import * as contractService from '../services/contract.service';
 import {
   authorizeAttachmentUpload,
@@ -87,6 +88,10 @@ router.use(
     authenticate,
     assertCanUpload: (formId, user) => contractService.assertCanUploadAttachments(formId, user as never),
     assertCanView: assertCanViewAttachments,
+    getContractFolderName: async (formId, user) => {
+      const form = await contractService.getContract(formId, user as never);
+      return buildContractDriveFolderName(form.id, form.title, form.referenceNo);
+    },
     upload: configuredDocumentUpload,
     generatePackage: (formId, user) => generateFinalPdfPackage(formId, user),
   }),

@@ -19,6 +19,8 @@ export interface AttachmentsRouterDeps {
   assertCanUpload(formId: string, user: AccessUser): Promise<void>;
   /** Admin, creator or assigned approver. */
   assertCanView(formId: string, user: AccessUser): Promise<void>;
+  /** Returns a safe, human-readable Drive folder name for this authorized contract. */
+  getContractFolderName(formId: string, user: AccessUser): Promise<string>;
   /** configured Multer middleware (field "files"). */
   upload: RequestHandler;
   /** Optional: generate and return the approved contract package. */
@@ -121,10 +123,13 @@ export function createAttachmentsRouter(deps: AttachmentsRouterDeps): Router {
             : parsedNames.error.issues
         );
       }
+      const formId = String(req.params.formId);
+      const user = currentUser(req);
       const records = await service.uploadAttachments({
-        contractFormId: String(req.params.formId),
+        contractFormId: formId,
+        contractFolderName: await deps.getContractFolderName(formId, user),
         category,
-        uploadedById: currentUser(req).id,
+        uploadedById: user.id,
         files,
         displayNames: parsedNames.data,
       });

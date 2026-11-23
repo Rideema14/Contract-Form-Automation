@@ -4,7 +4,7 @@ import { AppError } from '../../utils/app-error';
 import { AttachmentRecord } from './attachment.types';
 import { DocumentService } from './document.service';
 import { DriveError } from './drive.service';
-import { sanitizeFilename } from './file.utils';
+import { buildContractDriveFolderName, sanitizeFilename } from './file.utils';
 import { FinalPdfSource, generateFinalContractPdf } from './pdf.service';
 
 export interface FinalPdfActor {
@@ -66,9 +66,12 @@ export function createFinalPdfService(deps: FinalPdfServiceDeps) {
 
     return deps.documents.storeGeneratedFile({
       contractFormId: formId,
+      contractFolderName: buildContractDriveFolderName(form.id, form.title, form.referenceNo),
       category: 'GENERATED_PDF',
       uploadedById: actor.id,
-      fileName: `${form.referenceNo ?? form.id}.pdf`,
+      fileName: sanitizeFilename(
+        `${buildContractDriveFolderName(form.id, form.title, form.referenceNo)} - Final.pdf`
+      ),
       mimeType: 'application/pdf',
       content,
     });
