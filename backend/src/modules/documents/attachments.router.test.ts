@@ -226,10 +226,18 @@ describe('attachments router', () => {
     expect(drive.files.size).toBe(0);
   });
 
-  it('allows only authorized admins and approvers to download the final package', async () => {
+  it('allows the submitter owner, assigned approvers, and admins to download the final package', async () => {
     const a = app();
-    const submitterDenied = await request(a).post(`/api/forms/${FORM}/final-pdf`).set(owner);
-    expect(submitterDenied.status).toBe(403);
+    const submitterAllowed = await request(a)
+      .post(`/api/forms/${FORM}/final-pdf`)
+      .set(owner)
+      .buffer(true)
+      .parse((stream, callback) => {
+        const chunks: Buffer[] = [];
+        stream.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+        stream.on('end', () => callback(null, Buffer.concat(chunks)));
+      });
+    expect(submitterAllowed.status).toBe(200);
     const approverDenied = await request(a)
       .post(`/api/forms/${FORM}/final-pdf`)
       .set({ 'x-user': 'outsider:APPROVER' });
@@ -251,6 +259,6 @@ describe('attachments router', () => {
       expect(response.body.toString()).toBe('zip-content');
     }
 
-    expect(packageCalls).toEqual([FORM, FORM]);
+    expect(packageCalls).toEqual([FORM, FORM, FORM]);
   });
 });

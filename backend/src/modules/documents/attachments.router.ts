@@ -78,7 +78,7 @@ function contentDisposition(type: 'attachment' | 'inline', fileName: string): st
  *   GET  /:formId/attachments
  *   GET  /:formId/attachments/:attachmentId/download
  *   GET  /:formId/attachments/:attachmentId/view
- *   POST /:formId/final-pdf                          ADMIN or assigned APPROVER
+ *   POST /:formId/final-pdf                          Contract owner, assigned approver, or ADMIN
  */
 export function createAttachmentsRouter(deps: AttachmentsRouterDeps): Router {
   const { service, authenticate, assertCanUpload, assertCanView, upload } = deps;
@@ -158,9 +158,6 @@ export function createAttachmentsRouter(deps: AttachmentsRouterDeps): Router {
     const generatePackage = deps.generatePackage;
     router.post('/:formId/final-pdf', authenticate, async (req, res) => {
       const user = currentUser(req);
-      if (user.role !== 'ADMIN' && user.role !== 'APPROVER') {
-        throw new AppError(403, 'FORBIDDEN', 'Only administrators and approvers can download the contract package');
-      }
       const { formId } = parse(formParams, req.params, 'Invalid contract form ID');
       await assertCanView(formId, user);
       const file = await generatePackage(formId, user);

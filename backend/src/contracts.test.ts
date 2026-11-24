@@ -618,6 +618,46 @@ describe('contract service authorization and persistence', () => {
     findUnique.mockRestore();
   });
 
+  it('returns ordered approval steps and decisions with approver names for contract details', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: submitter.id,
+      status: ContractStatus.PENDING_APPROVAL,
+    } as never);
+
+    const detail = vi.spyOn(prisma.contractForm, 'findUniqueOrThrow').mockResolvedValue({
+      id: 'form-1',
+      approvalSteps: [
+        { level: 1, status: 'APPROVED', approver: { fullName: 'Bob Approver 1' } },
+        { level: 2, status: 'PENDING', approver: { fullName: 'Charlie Approver 2' } },
+      ],
+      approvalDecisions: [],
+    } as never);
+
+    const contract = await getContract('form-1', submitter);
+
+    expect(detail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          approvalSteps: expect.objectContaining({
+            orderBy: { level: 'asc' },
+          }),
+          approvalDecisions: expect.objectContaining({
+            orderBy: { createdAt: 'asc' },
+          }),
+        }),
+      }),
+    );
+    expect(contract).toEqual(
+      expect.objectContaining({
+        approvalSteps: expect.arrayContaining([
+          expect.objectContaining({ level: 1, approver: expect.objectContaining({ fullName: 'Bob Approver 1' }) }),
+          expect.objectContaining({ level: 2, approver: expect.objectContaining({ fullName: 'Charlie Approver 2' }) }),
+        ]),
+      }),
+    );
+  });
+
   it('allows an administrator to access another user contract', async () => {
     const findUnique = vi.spyOn(prisma.contractForm, 'findUnique');
 

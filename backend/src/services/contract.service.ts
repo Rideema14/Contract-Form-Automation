@@ -428,12 +428,30 @@ export async function getContract(formId: string, user: AuthUser) {
         },
       },
       approvalSteps: {
+        orderBy: { level: 'asc' },
         include: {
-          decisions: true,
+          approver: {
+            select: { id: true, fullName: true, email: true },
+          },
+          decisions: {
+            orderBy: { createdAt: 'asc' },
+            include: {
+              actor: {
+                select: { id: true, fullName: true, email: true },
+              },
+            },
+          },
         },
       },
       formSchemaVersion: true,
-      approvalDecisions: true,
+      approvalDecisions: {
+        orderBy: { createdAt: 'asc' },
+        include: {
+          actor: {
+            select: { id: true, fullName: true, email: true },
+          },
+        },
+      },
       auditLogs: {
         orderBy: { createdAt: 'asc' },
         include: {

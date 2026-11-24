@@ -49,13 +49,20 @@ export function createFinalPdfService(deps: FinalPdfServiceDeps) {
     actor: FinalPdfActor,
     loadedForm?: FinalPdfSource['form']
   ): Promise<AttachmentRecord> {
-    const existing = await deps.documents.findByCategory(formId, 'GENERATED_PDF');
-    if (existing) return existing;
-
     const form = loadedForm ?? await deps.loadForm(formId, actor);
     if (form.status !== 'APPROVED') {
       throw new AppError(409, 'FORM_NOT_APPROVED', 'The final PDF can only be generated for approved forms');
     }
+    if (form.approvalSteps && (
+      form.approvalSteps.length === 0 ||
+      form.approvalSteps.some((step) => step.status !== 'APPROVED')
+    )) {
+      throw new AppError(409, 'FORM_NOT_APPROVED', 'The final PDF can only be generated after every approval level is approved');
+    }
+
+    const existing = await deps.documents.findByCategory(formId, 'GENERATED_PDF');
+    if (existing) return existing;
+
     const history = await deps.loadHistory(formId, actor);
 
     const content = await (deps.generate ?? generateFinalContractPdf)({
@@ -78,6 +85,12 @@ export function createFinalPdfService(deps: FinalPdfServiceDeps) {
     const form = await deps.loadForm(formId, actor);
     if (form.status !== 'APPROVED') {
       throw new AppError(409, 'FORM_NOT_APPROVED', 'The final PDF package is only available for approved forms');
+    }
+    if (form.approvalSteps && (
+      form.approvalSteps.length === 0 ||
+      form.approvalSteps.some((step) => step.status !== 'APPROVED')
+    )) {
+      throw new AppError(409, 'FORM_NOT_APPROVED', 'The final PDF package is only available after every approval level is approved');
     }
 
     const finalPdf = await generateAndStoreFinalPdf(formId, actor, form);

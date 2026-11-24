@@ -345,6 +345,14 @@ export async function approveStep(
         },
       });
 
+      await tx.notification.create({
+        data: {
+          recipientId: step.contractForm.createdById,
+          contractFormId: step.contractFormId,
+          message: `${formIdentifier} was approved at Level ${step.level} and is pending approval at Level ${nextStep.level}.`,
+        },
+      });
+
       await tx.auditLog.create({
         data: {
           actorId: user.id,
@@ -733,19 +741,34 @@ export async function initializeOrResetApprovalWorkflow(
 
   const now = new Date();
   const resultSteps: ApprovalStep[] = [];
+  const existingByLevel = new Map(existingSteps.map((step) => [step.level, step]));
+  const firstUnapprovedLevel = approverIds.findIndex((_, index) => {
+    const existingStep = existingByLevel.get(index + 1);
+    return existingStep?.status !== ApprovalStatus.APPROVED;
+  }) + 1;
+  const activeLevel = firstUnapprovedLevel || approverIds.length + 1;
 
   if (existingSteps.length > 0) {
     for (let i = 0; i < approverIds.length; i++) {
       const level = i + 1;
       const approverId = approverIds[i];
-      const existingStep = existingSteps.find((s) => s.level === level);
+      const existingStep = existingByLevel.get(level);
+
+      if (existingStep?.status === ApprovalStatus.APPROVED) {
+        resultSteps.push(existingStep);
+        continue;
+      }
+
+      const status = level === activeLevel
+        ? ApprovalStatus.PENDING
+        : ApprovalStatus.WAITING;
 
       if (existingStep) {
         const updated = await tx.approvalStep.update({
           where: { id: existingStep.id },
           data: {
             approverId,
-            status: level === 1 ? ApprovalStatus.PENDING : ApprovalStatus.WAITING,
+            status,
             actedAt: null,
           },
         });
@@ -757,7 +780,7 @@ export async function initializeOrResetApprovalWorkflow(
             contractFormId,
             level,
             approverId,
-            status: level === 1 ? ApprovalStatus.PENDING : ApprovalStatus.WAITING,
+            status,
             actedAt: null,
           },
         });
@@ -810,13 +833,18 @@ export async function initializeOrResetApprovalWorkflow(
     }
   }
 
+  const activeStep = resultSteps.find((step) => step.status === ApprovalStatus.PENDING);
+  const resubmissionStatus = activeStep
+    ? ContractStatus.PENDING_APPROVAL
+    : ContractStatus.APPROVED;
+
   const updateFormResult = await tx.contractForm.updateMany({
     where: {
       id: contractFormId,
       status: { in: allowedStatuses },
     },
     data: {
-      status: ContractStatus.PENDING_APPROVAL,
+      status: resubmissionStatus,
       submittedAt: now,
     },
   });
@@ -827,13 +855,23 @@ export async function initializeOrResetApprovalWorkflow(
 
   const formIdentifier = form.referenceNo || form.title || 'Contract form';
 
-  await tx.notification.create({
-    data: {
-      recipientId: approverIds[0],
-      contractFormId,
-      message: `${formIdentifier} has been submitted and is pending your approval (Level 1).`,
-    },
-  });
+  if (activeStep) {
+    await tx.notification.create({
+      data: {
+        recipientId: activeStep.approverId,
+        contractFormId,
+        message: `${formIdentifier} has been submitted and is pending your approval (Level ${activeStep.level}).`,
+      },
+    });
+  } else {
+    await tx.notification.create({
+      data: {
+        recipientId: submitterId,
+        contractFormId,
+        message: `${formIdentifier} has been resubmitted and is approved under the updated approval workflow.`,
+      },
+    });
+  }
 
   await tx.auditLog.create({
     data: {
@@ -844,7 +882,9 @@ export async function initializeOrResetApprovalWorkflow(
       contractFormId,
       details: {
         levelsCount: approverIds.length,
-        level1ApproverId: approverIds[0],
+        activeLevel: activeStep?.level ?? null,
+        activeApproverId: activeStep?.approverId ?? null,
+        completedOnResubmission: !activeStep,
         resubmission: existingSteps.length > 0,
       },
     },

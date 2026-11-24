@@ -258,10 +258,10 @@ export default function ContractsPage() {
               className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_13rem_auto_auto] sm:items-end"
               onSubmit={submitSearch}
             >
-              <div className="min-w-0 space-y-2">
+              <div className="flex min-w-0 flex-col gap-2">
                 <Label htmlFor="contract-search">Search</Label>
                 <div className="relative">
-                  <Search className="absolute top-2 left-2.5 size-4 text-muted-foreground" />
+                  <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     id="contract-search"
                     className="h-10 pl-8"
@@ -271,7 +271,7 @@ export default function ContractsPage() {
                   />
                 </div>
               </div>
-              <div className="min-w-0 space-y-2">
+              <div className="flex min-w-0 flex-col gap-2">
                 <Label htmlFor="contract-status">Status</Label>
                 <Select value={status} onValueChange={changeStatus}>
                   <SelectTrigger id="contract-status" className="h-10 w-full">

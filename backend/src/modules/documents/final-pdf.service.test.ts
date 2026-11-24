@@ -77,6 +77,30 @@ describe('final PDF service', () => {
     expect(drive.uploads).toBe(0);
   });
 
+  it('refuses an approved status with an approval level still pending', async () => {
+    const drive = new FakeDrive();
+    const documents = new DocumentService({ drive, repository: new InMemoryAttachmentRepository() });
+    const generate = vi.fn().mockResolvedValue(Buffer.from('%PDF-fake'));
+    const service = createFinalPdfService({
+      documents,
+      generate,
+      loadForm: async () => ({
+        ...form('APPROVED'),
+        approvalSteps: [
+          { level: 1, status: 'APPROVED' },
+          { level: 2, status: 'PENDING' },
+        ],
+      } as FinalPdfSource['form']),
+      loadHistory: async () => history,
+    });
+
+    await expect(service.generateAndStoreFinalPdf('f1', actor)).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'FORM_NOT_APPROVED',
+    });
+    expect(drive.uploads).toBe(0);
+  });
+
   it('propagates generation errors', async () => {
     const drive = new FakeDrive();
     const service = createFinalPdfService({
