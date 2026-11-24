@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { downloadAttachment, getAttachmentViewUrl, listAttachments } from "./attachments-api";
+import { apiErrorMessage } from "@/lib/api-client";
+import { deleteAttachment, downloadAttachment, getAttachmentViewUrl, listAttachments } from "./attachments-api";
 import type { Attachment } from "./types";
 
 const CATEGORY_LABELS: Record<Attachment["category"], string> = {
@@ -19,15 +22,18 @@ interface AttachmentListProps {
   formId: string;
   /** Change this value (for example after an upload) to reload the list. */
   refreshKey?: number;
+  canDelete?: boolean;
 }
 
 function formatSize(bytes: number): string {
   return bytes < 1024 * 1024 ? `${Math.max(1, Math.ceil(bytes / 1024))} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function AttachmentList({ formId, refreshKey = 0 }: AttachmentListProps) {
+export function AttachmentList({ formId, refreshKey = 0, canDelete = false }: AttachmentListProps) {
   const [items, setItems] = useState<Attachment[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reloadVersion, setReloadVersion] = useState(0);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,7 +49,24 @@ export function AttachmentList({ formId, refreshKey = 0 }: AttachmentListProps) 
     return () => {
       cancelled = true;
     };
-  }, [formId, refreshKey]);
+  }, [formId, refreshKey, reloadVersion]);
+
+  async function removeAttachment(item: Attachment) {
+    const name = item.displayName || item.fileName;
+    if (!window.confirm(`Delete "${name}"? This will permanently remove the attachment.`)) return;
+
+    setDeletingId(item.id);
+    try {
+      await deleteAttachment(formId, item.id);
+      setReloadVersion((version) => version + 1);
+      toast.success("Attachment deleted.");
+    } catch (caught) {
+      setReloadVersion((version) => version + 1);
+      toast.error(apiErrorMessage(caught, "Could not delete the attachment."));
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   if (error) return <p role="alert" className="text-sm text-destructive">{error}</p>;
   if (!items) return <p className="text-sm text-muted-foreground">Loading attachments...</p>;
@@ -84,6 +107,18 @@ export function AttachmentList({ formId, refreshKey = 0 }: AttachmentListProps) 
             >
               Download
             </Button>
+            {canDelete && item.category !== "GENERATED_PDF" && (
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                disabled={deletingId !== null}
+                aria-label={`Delete ${item.displayName || item.fileName}`}
+                onClick={() => void removeAttachment(item)}
+              >
+                {deletingId === item.id ? "Deleting..." : <><Trash2 />Delete</>}
+              </Button>
+            )}
           </div>
         </li>
       ))}

@@ -25,6 +25,58 @@ function decimal(value?: string | null): Prisma.Decimal | null | undefined {
   return value == null ? value : new Prisma.Decimal(value);
 }
 
+async function nextReferenceNumber(tx: Prisma.TransactionClient): Promise<string> {
+  await tx.$queryRaw`
+    WITH reference_lock AS MATERIALIZED (
+      SELECT pg_advisory_xact_lock(134645, 1)
+    )
+    SELECT 1::int AS locked
+    FROM reference_lock
+  `;
+
+  const year = new Date().getUTCFullYear();
+  const prefix = `CF-${year}-`;
+  const references = await tx.contractForm.findMany({
+    where: { referenceNo: { startsWith: prefix } },
+    select: { referenceNo: true },
+  });
+  const pattern = new RegExp(`^CF-${year}-(\\d+)$`);
+  const highest = references.reduce((max, form) => {
+    const match = form.referenceNo?.match(pattern);
+    const value = match ? Number(match[1]) : 0;
+    return Number.isSafeInteger(value) ? Math.max(max, value) : max;
+  }, 0);
+
+  return `${prefix}${String(highest + 1).padStart(4, '0')}`;
+}
+
+async function assignReferenceNumberToForm(formId: string): Promise<string> {
+  return prisma.$transaction(async (tx) => {
+    const current = await tx.contractForm.findUnique({
+      where: { id: formId },
+      select: { referenceNo: true },
+    });
+    if (!current) {
+      throw new AppError(404, 'FORM_NOT_FOUND', 'Contract form not found');
+    }
+    if (current.referenceNo) return current.referenceNo;
+
+    const referenceNo = await nextReferenceNumber(tx);
+    const updated = await tx.contractForm.updateMany({
+      where: { id: formId, referenceNo: null },
+      data: { referenceNo },
+    });
+    if (updated.count === 1) return referenceNo;
+
+    const latest = await tx.contractForm.findUniqueOrThrow({
+      where: { id: formId },
+      select: { referenceNo: true },
+    });
+    if (latest.referenceNo) return latest.referenceNo;
+    throw new AppError(409, 'REFERENCE_ASSIGNMENT_CONFLICT', 'Could not assign a contract reference number');
+  });
+}
+
 function requiredDecimal(
   value: Prisma.Decimal | null | undefined,
   field: string
@@ -134,6 +186,41 @@ export async function assertCanViewAttachments(
   await getAccessibleForm(formId, user);
 }
 
+/** Admins may delete user-uploaded attachments; creators may do so while the form is editable. */
+export async function assertCanDeleteAttachments(
+  formId: string,
+  user: AuthUser
+): Promise<void> {
+  assertAuthenticated(user);
+  if (user.role === UserRole.ADMIN) {
+    await getAccessibleForm(formId, user);
+    return;
+  }
+  await getEditableForm(formId, user);
+}
+
+export async function recordAttachmentDeletion(input: {
+  formId: string;
+  attachmentId: string;
+  actorId: string;
+  category: string;
+  fileName: string;
+}): Promise<void> {
+  await prisma.auditLog.create({
+    data: {
+      actorId: input.actorId,
+      action: 'ATTACHMENT_DELETED',
+      entityType: 'Attachment',
+      entityId: input.attachmentId,
+      contractFormId: input.formId,
+      details: {
+        category: input.category,
+        fileName: input.fileName,
+      },
+    },
+  });
+}
+
 async function getAccessibleForm(formId: string, user: AuthUser) {
   assertAuthenticated(user);
 
@@ -218,33 +305,39 @@ export async function createDraft(
   }
   const normalizedValues = normalizeDynamicValues(latestSchema.definition, dynamicValues);
 
-  if (input.referenceNo) {
-    const existing = await prisma.contractForm.findUnique({
-      where: { referenceNo: input.referenceNo },
-      select: { id: true },
-    });
-    if (existing) {
-      throw new AppError(
-        409,
-        'DUPLICATE_REFERENCE',
-        'This reference number already exists',
-        [{ path: 'referenceNo', message: 'This reference number already exists' }]
-      );
-    }
-  }
-
   try {
-    return await prisma.contractForm.create({
-      data: {
-        ...contractInput,
-        formSchemaVersionId: latestSchema.id,
-        dynamicValues: normalizedValues as Prisma.InputJsonValue,
-        budgetProvision: decimal(input.budgetProvision),
-        contractAmount: decimal(input.contractAmount),
-        taxAmount: decimal(input.taxAmount) ?? new Prisma.Decimal(0),
-        createdById: user.id,
-        status: ContractStatus.DRAFT,
-      },
+    return await prisma.$transaction(async (tx) => {
+      let referenceNo = input.referenceNo?.trim() || null;
+      if (referenceNo) {
+        const existing = await tx.contractForm.findUnique({
+          where: { referenceNo },
+          select: { id: true },
+        });
+        if (existing) {
+          throw new AppError(
+            409,
+            'DUPLICATE_REFERENCE',
+            'This reference number already exists',
+            [{ path: 'referenceNo', message: 'This reference number already exists' }]
+          );
+        }
+      } else {
+        referenceNo = await nextReferenceNumber(tx);
+      }
+
+      return tx.contractForm.create({
+        data: {
+          ...contractInput,
+          referenceNo,
+          formSchemaVersionId: latestSchema.id,
+          dynamicValues: normalizedValues as Prisma.InputJsonValue,
+          budgetProvision: decimal(input.budgetProvision),
+          contractAmount: decimal(input.contractAmount),
+          taxAmount: decimal(input.taxAmount) ?? new Prisma.Decimal(0),
+          createdById: user.id,
+          status: ContractStatus.DRAFT,
+        },
+      });
     });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -362,7 +455,10 @@ export async function listContracts(
 }
 
 export async function getContract(formId: string, user: AuthUser) {
-  await getAccessibleForm(formId, user);
+  const form = await getAccessibleForm(formId, user);
+  if (form.referenceNo === null) {
+    await assignReferenceNumberToForm(formId);
+  }
 
   return prisma.contractForm.findUniqueOrThrow({
     where: { id: formId },
@@ -431,12 +527,30 @@ export async function getContract(formId: string, user: AuthUser) {
         },
       },
       approvalSteps: {
+        orderBy: { level: 'asc' },
         include: {
-          decisions: true,
+          approver: {
+            select: { id: true, fullName: true, email: true },
+          },
+          decisions: {
+            orderBy: { createdAt: 'asc' },
+            include: {
+              actor: {
+                select: { id: true, fullName: true, email: true },
+              },
+            },
+          },
         },
       },
       formSchemaVersion: true,
-      approvalDecisions: true,
+      approvalDecisions: {
+        orderBy: { createdAt: 'asc' },
+        include: {
+          actor: {
+            select: { id: true, fullName: true, email: true },
+          },
+        },
+      },
       auditLogs: {
         orderBy: { createdAt: 'asc' },
         include: {
@@ -458,6 +572,23 @@ export async function updateContract(
   const { dynamicValues, ...contractInput } = input;
   let normalizedInput: Omit<ContractDraftInput, 'dynamicValues'> = { ...contractInput };
   let normalizedDynamicValues: Prisma.InputJsonValue | undefined;
+
+  if (
+    form.referenceNo &&
+    input.referenceNo?.trim() &&
+    input.referenceNo.trim() !== form.referenceNo
+  ) {
+    throw new AppError(
+      409,
+      'REFERENCE_NUMBER_IMMUTABLE',
+      'A contract reference number cannot be changed after draft creation'
+    );
+  }
+
+  const referenceNo = form.referenceNo === null
+    ? input.referenceNo?.trim() || await assignReferenceNumberToForm(formId)
+    : form.referenceNo ?? input.referenceNo?.trim() ?? null;
+  normalizedInput.referenceNo = referenceNo;
 
   if (Object.prototype.hasOwnProperty.call(input, 'dynamicValues')) {
     const schema = await prisma.formSchemaVersion.findUnique({
@@ -483,7 +614,6 @@ export async function updateContract(
           contractFormId: formId,
         },
       });
-
       if (!bidder) {
         throw new AppError(
           409,
@@ -503,10 +633,10 @@ export async function updateContract(
     }
   }
 
-  if (input.referenceNo) {
+  if (input.referenceNo?.trim() && !form.referenceNo) {
     const existing = await prisma.contractForm.findFirst({
       where: {
-        referenceNo: input.referenceNo,
+        referenceNo: input.referenceNo.trim(),
         id: { not: formId },
       },
       select: { id: true },

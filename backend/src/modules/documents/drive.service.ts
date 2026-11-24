@@ -8,6 +8,7 @@ export interface DriveStorage {
     mimeType: string;
     body: Readable;
     contractFormId: string;
+    contractFolderName: string;
   }): Promise<{ driveFileId: string }>;
   download(driveFileId: string): Promise<Readable>;
   remove(driveFileId: string): Promise<void>;
@@ -117,7 +118,7 @@ export function createGoogleDriveStorage(options: GoogleDriveOptions = {}): Driv
     throw new DriveError('GOOGLE_DRIVE_FOLDER_ID is required for service-account storage');
   }
 
-  const contractFolders = new Map<string, Promise<string>>();
+  const contractFolders = new Map<string, Promise<{ id: string; name: string }>>();
   let rootFolderPromise: Promise<string> | undefined;
 
   const getRootFolderId = (): Promise<string> => {
@@ -157,48 +158,95 @@ export function createGoogleDriveStorage(options: GoogleDriveOptions = {}): Driv
     return pending;
   };
 
-  const getContractFolderId = (contractFormId: string): Promise<string> => {
-    const cached = contractFolders.get(contractFormId);
-    if (cached) return cached;
+  const findOrCreateContractFolder = async (
+    contractFormId: string,
+    contractFolderName: string
+  ): Promise<{ id: string; name: string }> => {
+    const rootFolderId = await getRootFolderId();
+    const baseQuery = `'${rootFolderId}' in parents and mimeType = '${FOLDER_MIME_TYPE}' and trashed = false`;
+    const byContractProperty = await driveClient.files.list({
+      q: `${baseQuery} and appProperties has { key='contractFormId' and value='${contractFormId}' }`,
+      fields: 'files(id)',
+      pageSize: 1,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+    let existingId = byContractProperty.data.files?.[0]?.id;
 
-    const pending = (async () => {
-      const rootFolderId = await getRootFolderId();
-      const result = await driveClient.files.list({
-        q: `'${rootFolderId}' in parents and name = '${contractFormId.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}' and mimeType = '${FOLDER_MIME_TYPE}' and trashed = false`,
+    if (!existingId) {
+      const legacyName = contractFormId.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      const legacyFolder = await driveClient.files.list({
+        q: `${baseQuery} and name = '${legacyName}'`,
         fields: 'files(id)',
         pageSize: 1,
         supportsAllDrives: true,
         includeItemsFromAllDrives: true,
       });
-      const existingId = result.data.files?.[0]?.id;
-      if (existingId) return existingId;
+      existingId = legacyFolder.data.files?.[0]?.id;
+    }
 
-      const created = await driveClient.files.create({
+    if (existingId) {
+      await driveClient.files.update({
+        fileId: existingId,
         requestBody: {
-          name: contractFormId,
-          mimeType: FOLDER_MIME_TYPE,
-          parents: [rootFolderId],
+          name: contractFolderName,
+          appProperties: { contractFormId },
         },
         fields: 'id',
         supportsAllDrives: true,
       });
-      if (!created.data.id) throw new Error('Drive returned no contract folder id');
-      return created.data.id;
-    })();
+      return { id: existingId, name: contractFolderName };
+    }
 
-    contractFolders.set(contractFormId, pending);
-    void pending.catch(() => {
-      if (contractFolders.get(contractFormId) === pending) {
-        contractFolders.delete(contractFormId);
-      }
+    const created = await driveClient.files.create({
+      requestBody: {
+        name: contractFolderName,
+        mimeType: FOLDER_MIME_TYPE,
+        parents: [rootFolderId],
+        appProperties: { contractFormId },
+      },
+      fields: 'id',
+      supportsAllDrives: true,
     });
-    return pending;
+    if (!created.data.id) throw new Error('Drive returned no contract folder id');
+    return { id: created.data.id, name: contractFolderName };
+  };
+
+  const getContractFolderId = async (
+    contractFormId: string,
+    contractFolderName: string
+  ): Promise<string> => {
+    let pending = contractFolders.get(contractFormId);
+    if (!pending) {
+      pending = findOrCreateContractFolder(contractFormId, contractFolderName);
+      contractFolders.set(contractFormId, pending);
+      void pending.catch(() => {
+        if (contractFolders.get(contractFormId) === pending) {
+          contractFolders.delete(contractFormId);
+        }
+      });
+    }
+
+    const folder = await pending;
+    if (folder.name !== contractFolderName) {
+      await driveClient.files.update({
+        fileId: folder.id,
+        requestBody: {
+          name: contractFolderName,
+          appProperties: { contractFormId },
+        },
+        fields: 'id',
+        supportsAllDrives: true,
+      });
+      contractFolders.set(contractFormId, Promise.resolve({ id: folder.id, name: contractFolderName }));
+    }
+    return folder.id;
   };
 
   return {
-    async upload({ name, mimeType, body, contractFormId }) {
+    async upload({ name, mimeType, body, contractFormId, contractFolderName }) {
       try {
-        const contractFolderId = await getContractFolderId(contractFormId);
+        const contractFolderId = await getContractFolderId(contractFormId, contractFolderName);
         const res = await driveClient.files.create({
           requestBody: { name, parents: [contractFolderId] },
           media: { mimeType, body },

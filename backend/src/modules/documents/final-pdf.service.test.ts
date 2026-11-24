@@ -11,10 +11,12 @@ import { FinalPdfSource } from './pdf.service';
 class FakeDrive implements DriveStorage {
   uploads = 0;
   files = new Map<string, Buffer>();
-  async upload({ body }: { name: string; mimeType: string; body: Readable; contractFormId: string }) {
+  folderNames: string[] = [];
+  async upload({ body, contractFolderName }: Parameters<DriveStorage['upload']>[0]) {
     const chunks: Buffer[] = [];
     for await (const chunk of body) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     const id = `d${++this.uploads}`;
+    this.folderNames.push(contractFolderName);
     this.files.set(id, Buffer.concat(chunks));
     return { driveFileId: id };
   }
@@ -26,7 +28,12 @@ class FakeDrive implements DriveStorage {
   async remove(id: string) { this.files.delete(id); }
 }
 
-const form = (status: string) => ({ id: 'f1', referenceNo: 'CF-1', status }) as unknown as FinalPdfSource['form'];
+const form = (status: string) => ({
+  id: 'f1',
+  referenceNo: 'CF-1',
+  title: 'Project X',
+  status,
+}) as unknown as FinalPdfSource['form'];
 const history = { approvalSteps: [], decisions: [] } as FinalPdfSource['history'];
 const actor = { id: 'u1', role: 'APPROVER' };
 
@@ -43,11 +50,17 @@ function setup(status = 'APPROVED') {
 }
 
 describe('final PDF service', () => {
-  it('stores a GENERATED_PDF attachment named after the reference number', async () => {
+  it('stores a GENERATED_PDF attachment named with the reference number', async () => {
     const { service, drive } = setup();
     const rec = await service.generateAndStoreFinalPdf('f1', actor);
-    expect(rec).toMatchObject({ category: 'GENERATED_PDF', fileName: 'CF-1.pdf', mimeType: 'application/pdf', uploadedById: 'u1' });
+    expect(rec).toMatchObject({
+      category: 'GENERATED_PDF',
+      fileName: 'CF-1_-_Final.pdf',
+      mimeType: 'application/pdf',
+      uploadedById: 'u1',
+    });
     expect(drive.uploads).toBe(1);
+    expect(drive.folderNames).toEqual(['CF-1']);
   });
 
   it('is idempotent: a second call returns the existing PDF', async () => {
@@ -77,6 +90,30 @@ describe('final PDF service', () => {
     expect(drive.uploads).toBe(0);
   });
 
+  it('refuses an approved status with an approval level still pending', async () => {
+    const drive = new FakeDrive();
+    const documents = new DocumentService({ drive, repository: new InMemoryAttachmentRepository() });
+    const generate = vi.fn().mockResolvedValue(Buffer.from('%PDF-fake'));
+    const service = createFinalPdfService({
+      documents,
+      generate,
+      loadForm: async () => ({
+        ...form('APPROVED'),
+        approvalSteps: [
+          { level: 1, status: 'APPROVED' },
+          { level: 2, status: 'PENDING' },
+        ],
+      } as FinalPdfSource['form']),
+      loadHistory: async () => history,
+    });
+
+    await expect(service.generateAndStoreFinalPdf('f1', actor)).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'FORM_NOT_APPROVED',
+    });
+    expect(drive.uploads).toBe(0);
+  });
+
   it('propagates generation errors', async () => {
     const drive = new FakeDrive();
     const service = createFinalPdfService({
@@ -95,6 +132,7 @@ describe('final PDF service', () => {
     const spreadsheet = Buffer.from('saved spreadsheet bytes');
     await documents.storeGeneratedFile({
       contractFormId: 'f1',
+      contractFolderName: 'CF-1',
       category: 'SUPPORTING',
       uploadedById: 'u1',
       fileName: 'vendor-quote.pdf',
@@ -103,6 +141,7 @@ describe('final PDF service', () => {
     });
     await documents.storeGeneratedFile({
       contractFormId: 'f1',
+      contractFolderName: 'CF-1',
       category: 'COST_ESTIMATE_EXCEL',
       uploadedById: 'u1',
       fileName: 'estimate.xlsx',
@@ -131,6 +170,7 @@ describe('final PDF service', () => {
     const savedPdf = Buffer.from('%PDF-existing-final');
     await documents.storeGeneratedFile({
       contractFormId: 'f1',
+      contractFolderName: 'CF-1',
       category: 'GENERATED_PDF',
       uploadedById: 'u1',
       fileName: 'CF-1.pdf',
@@ -150,6 +190,7 @@ describe('final PDF service', () => {
     const { drive, documents, service } = setup();
     const generated = await documents.storeGeneratedFile({
       contractFormId: 'f1',
+      contractFolderName: 'CF-1',
       category: 'GENERATED_PDF',
       uploadedById: 'u1',
       fileName: 'CF-1.pdf',

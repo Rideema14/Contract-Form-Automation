@@ -170,15 +170,19 @@ export type Attachment = {
 
 export type ApprovalStep = {
   id: string;
+  contractFormId?: string;
   approverId?: string;
   level: number;
   status: string;
   actedAt: string | null;
+  approver?: { id: string; fullName: string; email: string };
   decisions: ApprovalDecision[];
 };
 
 export type ApprovalDecision = {
   id: string;
+  approvalStepId: string;
+  actor?: { id: string; fullName: string; email: string };
   decision: string;
   comment: string | null;
   createdAt: string;

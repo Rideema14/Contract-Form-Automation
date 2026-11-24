@@ -12,7 +12,11 @@ export class PrismaAttachmentRepository implements AttachmentRepository {
   listByContract(contractFormId: string): Promise<AttachmentRecord[]> {
     return prisma.attachment.findMany({ where: { contractFormId }, orderBy: { createdAt: 'asc' } });
   }
-  async delete(id: string): Promise<void> {
-    await prisma.attachment.delete({ where: { id } });
+  async delete(id: string): Promise<boolean> {
+    const result = await prisma.attachment.deleteMany({ where: { id } });
+    return result.count > 0;
+  }
+  async restore(record: AttachmentRecord): Promise<void> {
+    await prisma.attachment.create({ data: record });
   }
 }

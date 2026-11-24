@@ -1,4 +1,4 @@
-import { API_BASE_URL, ApiError, apiGet } from "@/lib/api-client";
+import { API_BASE_URL, ApiError, apiDelete, apiGet } from "@/lib/api-client";
 import type { ApiErrorResponse, ApiSuccessResponse } from "@/types/api";
 import type { Attachment, UploadableCategory, UploadLimits } from "./types";
 
@@ -57,6 +57,10 @@ export async function downloadFinalPdfPackage(
 
 export function listAttachments(formId: string): Promise<Attachment[]> {
   return apiGet<Attachment[]>(base(formId));
+}
+
+export function deleteAttachment(formId: string, attachmentId: string): Promise<{ id: string }> {
+  return apiDelete<{ id: string }>(`${base(formId)}/${encodeURIComponent(attachmentId)}`);
 }
 
 export function getAttachmentViewUrl(formId: string, attachmentId: string): string {
