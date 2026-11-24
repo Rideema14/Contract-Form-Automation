@@ -7,6 +7,7 @@ import {
 import {
   normalizeDynamicValues,
   publishFormSchema,
+  saveFormSchemaDraft,
   validateDynamicSubmission,
 } from './services/form-builder.service';
 
@@ -119,6 +120,7 @@ describe('form builder schemas and dynamic values', () => {
       publishedAt: new Date('2026-11-23T00:00:00Z'),
     });
     const upsert = vi.fn().mockResolvedValue({});
+    const auditCreate = vi.fn().mockResolvedValue({ id: 'audit-1' });
     const tx = {
       formSchemaVersion: {
         findFirst: vi.fn().mockResolvedValue({ id: 'schema-v7', version: 7, definition }),
@@ -128,19 +130,53 @@ describe('form builder schemas and dynamic values', () => {
         findUnique: vi.fn().mockResolvedValue({ id: 'active', definition }),
         upsert,
       },
+      auditLog: { create: auditCreate },
     };
     vi.spyOn(prisma, '$transaction').mockImplementation(
       async (callback) => callback(tx as never) as never,
     );
 
-    const published = await publishFormSchema();
+    const published = await publishFormSchema('admin-1');
 
     expect(published.version).toBe(8);
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
       data: { version: 8, definition },
     }));
     expect(upsert).toHaveBeenCalled();
+    expect(auditCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        actorId: 'admin-1',
+        action: 'FORM_SCHEMA_PUBLISHED',
+        entityType: 'FormSchemaVersion',
+        entityId: 'schema-v8',
+        details: { version: 8 },
+      }),
+    });
     expect(tx.formSchemaVersion).not.toHaveProperty('update');
     expect(tx.formSchemaVersion).not.toHaveProperty('delete');
+  });
+
+  it('audits a saved form-schema draft with structural metadata only', async () => {
+    const auditCreate = vi.fn().mockResolvedValue({ id: 'audit-1' });
+    const upsert = vi.fn().mockResolvedValue({ id: 'active', definition });
+    const tx = {
+      formSchemaDraft: { upsert },
+      auditLog: { create: auditCreate },
+    };
+    vi.spyOn(prisma, '$transaction').mockImplementation(
+      async (callback) => callback(tx as never) as never,
+    );
+
+    await saveFormSchemaDraft(definition, 'admin-1');
+
+    expect(auditCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        actorId: 'admin-1',
+        action: 'FORM_SCHEMA_DRAFT_SAVED',
+        entityType: 'FormSchemaDraft',
+        entityId: 'active',
+        details: { sectionCount: 1, fieldCount: 3 },
+      }),
+    });
   });
 });

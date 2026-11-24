@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, LoaderCircle, Plus, Save, Send, Trash2 } from "lucide-react";
+import { ArrowLeft, FileDown, LoaderCircle, Plus, Save, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,9 +28,10 @@ import {
 import type { Bidder, Contract, ContractDraft, CostLine, DynamicValues, Evaluation, FormSchemaVersion, ReferenceData } from "@/types/contracts";
 import { ApproverSelect } from "@/components/approvals/ApproverSelect";
 import { API_BASE_URL } from "@/lib/api-client";
+import { useAuth } from "@/hooks/useAuth";
 import { AttachmentUploader } from "@/features/attachments/attachment-uploader";
 import { AttachmentList } from "@/features/attachments/attachment-list";
-import { getAttachmentLimits } from "@/features/attachments/attachments-api";
+import { downloadCurrentContractPdf, getAttachmentLimits } from "@/features/attachments/attachments-api";
 import type { UploadLimits } from "@/features/attachments/types";
 import { CompanyDetailsFields, companyContactFields, emptyCompanyDetails, type CompanyDetails } from "@/features/contracts/company-details-fields";
 import { defaultDynamicValues, DynamicFormSections, validateDynamicValues } from "@/features/contracts/dynamic-form-sections";
@@ -144,6 +145,40 @@ function ReadOnlyField({ label, value, wide = false }: { label: string; value: R
   );
 }
 
+function CurrentPdfDownloadButton({
+  formId,
+  referenceNo,
+  disabled = false,
+}: {
+  formId: string;
+  referenceNo: string | null;
+  disabled?: boolean;
+}) {
+  const [downloading, setDownloading] = useState(false);
+
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      disabled={disabled || downloading}
+      onClick={async () => {
+        setDownloading(true);
+        try {
+          await downloadCurrentContractPdf(formId, referenceNo);
+          toast.success("Current contract PDF downloaded.");
+        } catch (caught) {
+          toast.error(errorMessage(caught, "Could not download contract PDF."));
+        } finally {
+          setDownloading(false);
+        }
+      }}
+    >
+      {downloading ? <LoaderCircle className="animate-spin" /> : <FileDown />}
+      Download PDF
+    </Button>
+  );
+}
+
 function ReadOnlyContractForm({
   contract,
   values,
@@ -161,6 +196,7 @@ function ReadOnlyContractForm({
   approverIds: string[];
   returnTo: string;
 }) {
+  const { authUser } = useAuth();
   const recommendedBidder = bidders.find((bidder) => bidder.id === values.recommendedBidderId)
     ?? contract.recommendedBidder;
   const currency = refs?.currencies.find((item) => item.id === values.currencyId)
@@ -169,13 +205,16 @@ function ReadOnlyContractForm({
   return (
     <main className="min-h-screen bg-muted/30 p-4 sm:p-8">
       <div className="mx-auto flex max-w-6xl flex-col gap-6">
-        <header>
-          <Link href={returnTo} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="size-4" />Back
-          </Link>
-          <h1 className="mt-2 text-2xl font-bold sm:text-3xl">{contract.title || "Untitled contract"}</h1>
-          <p className="text-sm text-muted-foreground">{contract.referenceNo || "No reference number"}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Read-only contract form</p>
+        <header className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <Link href={returnTo} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+              <ArrowLeft className="size-4" />Back
+            </Link>
+            <h1 className="mt-2 text-2xl font-bold sm:text-3xl">{contract.title || "Untitled contract"}</h1>
+            <p className="text-sm text-muted-foreground">{contract.referenceNo || "No reference number"}</p>
+            <p className="mt-1 text-xs text-muted-foreground">Read-only contract form</p>
+          </div>
+          {authUser && <CurrentPdfDownloadButton formId={contract.id} referenceNo={contract.referenceNo} />}
         </header>
 
         <Card>
@@ -320,6 +359,7 @@ function ReadOnlyContractForm({
 
 export function ContractEditor({ contractId, edit = true, readOnly = false, returnTo = "/contracts" }: Props) {
   const router = useRouter();
+  const { authUser } = useAuth();
   const [values, setValues] = useState<FormValues>(emptyValues);
   const [activeContractId, setActiveContractId] = useState<string | undefined>(contractId);
   const [contract, setContract] = useState<Contract | null>(null);
@@ -784,10 +824,35 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
 
   type FieldKey = Extract<keyof FormValues, string>;
   const input = (key: FieldKey, label: string, type = "text", readOnly = false) => (
-    <div className="space-y-2"><Label htmlFor={key}>{label}</Label><Input id={key} type={type} value={values[key]} readOnly={readOnly} onChange={(event) => setValue(key, event.target.value)} aria-invalid={Boolean(errors[key])} />{readOnly && <p className="text-xs text-muted-foreground">Generated automatically when the draft is first saved.</p>}{errors[key] && <p className="text-sm text-destructive">{errors[key]}</p>}</div>
+    <div className="space-y-1.5">
+      <Label htmlFor={key} className="text-sm font-medium">{label}</Label>
+      <Input
+        id={key}
+        type={type}
+        className="h-10"
+        value={values[key]}
+        readOnly={readOnly}
+        onChange={(event) => setValue(key, event.target.value)}
+        aria-invalid={Boolean(errors[key])}
+      />
+      {readOnly && <p className="text-xs text-muted-foreground">Generated automatically when the draft is first saved.</p>}
+      {errors[key] && <p className="text-xs text-destructive">{errors[key]}</p>}
+    </div>
   );
   const select = (key: FieldKey, label: string, options: { id: string; name: string }[], empty: string) => (
-    <div className="space-y-2"><Label htmlFor={key}>{label}</Label><select id={key} className="h-9 w-full rounded-lg border bg-background px-2 text-sm" value={values[key]} onChange={(event) => setValue(key, event.target.value)}><option value="">{empty}</option>{options.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}</select>{errors[key] && <p className="text-sm text-destructive">{errors[key]}</p>}</div>
+    <div className="space-y-1.5">
+      <Label htmlFor={key} className="text-sm font-medium">{label}</Label>
+      <select
+        id={key}
+        className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        value={values[key]}
+        onChange={(event) => setValue(key, event.target.value)}
+      >
+        <option value="">{empty}</option>
+        {options.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
+      </select>
+      {errors[key] && <p className="text-xs text-destructive">{errors[key]}</p>}
+    </div>
   );
   function goToError(field: string) {
     const sectionId =
@@ -801,210 +866,467 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
       : "custom-form-fields";
     document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
-  return <main className="min-h-screen bg-muted/30 p-4 sm:p-8"><div className="mx-auto flex max-w-6xl flex-col gap-6">
-    <div className="flex flex-wrap items-center justify-between gap-4"><div><Link href={returnTo} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="size-4" />Back</Link><h1 className="mt-2 text-2xl font-bold">{contract ? "Edit contract" : "New contract"}</h1><p className={saveState === "Unable to save. Retry." ? "mt-1 text-sm text-destructive" : "mt-1 text-sm text-muted-foreground"}>{saveState}</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => void save()} disabled={busy || attachmentsUploading || saveInFlight.current !== null}><Save />Save draft</Button><Button onClick={() => void save(true)} disabled={busy || attachmentsUploading || preDraftUploadsPending || saveInFlight.current !== null}><Send />Submit</Button></div></div>
-    <section aria-label="Contract completion" className="sticky top-16 z-20 rounded-lg border bg-background/95 p-3 shadow-sm backdrop-blur">
-      <div className="mb-2 flex items-center justify-between gap-3 text-sm">
-        <span className="font-medium">{completionPercent}% complete</span>
-        <span className="text-muted-foreground">{completionCount} of {completionItems.length} sections ready</span>
-      </div>
-      <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${completionPercent}%` }} /></div>
-      <nav aria-label="Contract form sections" className="flex gap-2 overflow-x-auto pb-1">
-        {[
-          ["project-identification", "Identification"],
-          ["project-description", "Description"],
-          ["contract-information", "Information"],
-          ["bidder-management", "Bidders"],
-          ["financial-information", "Financial"],
-          ["supporting-documents", "Documents"],
-          ["approval-workflow", "Approvals"],
-          ["budget-information", "Budget"],
-        ].map(([id, label]) => (
-          <button key={id} type="button" onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })} className="shrink-0 rounded-md border px-2.5 py-1.5 text-xs hover:bg-muted">{label}</button>
-        ))}
-      </nav>
-    </section>
-    {attempted && Object.keys(errors).length > 0 && <div role="alert" className="scroll-mt-36 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive"><p className="font-semibold">Complete these items before submitting:</p><ul className="mt-2 list-inside space-y-1">{Object.entries(errors).map(([field, message]) => <li key={field}><button type="button" className="text-left underline underline-offset-2" onClick={() => goToError(field)}>{message}</button></li>)}</ul></div>}
-    <Card id="project-identification" className="scroll-mt-40 order-1"><CardHeader><CardTitle>Project identification</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{input("title", "Project name / contractor / contract title")}{input("referenceNo", "Reference number", "text", true)}</CardContent></Card>
-    <Card id="project-description" className="scroll-mt-40 order-2"><CardHeader><CardTitle>Project Description</CardTitle></CardHeader><CardContent><div className="space-y-2"><Label htmlFor="scope">Scope of work</Label><Textarea id="scope" value={values.scope} onChange={(event) => setValue("scope", event.target.value)} aria-invalid={Boolean(errors.scope)} />{errors.scope && <p className="text-sm text-destructive">{errors.scope}</p>}</div></CardContent></Card>
-    <Card id="contract-information" className="scroll-mt-40 order-3"><CardHeader><CardTitle>Contract information</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{select("sponsorDepartmentId", "Sponsor department", refs?.departments ?? [], "Select department")}{select("contractCategoryId", "Contract category", refs?.categories ?? [], "Select category")}<div className="md:col-span-2 space-y-2"><Label htmlFor="procurementRationale">Sourcing / procurement rationale</Label><Textarea id="procurementRationale" value={values.procurementRationale} onChange={(event) => setValue("procurementRationale", event.target.value)} aria-invalid={Boolean(errors.procurementRationale)} />{errors.procurementRationale && <p className="text-sm text-destructive">{errors.procurementRationale}</p>}</div></CardContent></Card>
-    <Card id="financial-information" className="scroll-mt-40 order-5"><CardHeader><CardTitle>Financial and vendor information</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{input("contractAmount", "Estimated contract amount", "number")}{select("currencyId", "Currency", (refs?.currencies ?? []).map((item) => ({ id: item.id, name: `${item.code} - ${item.name}` })), "Select currency")}<div className="space-y-2"><Label htmlFor="recommendedBidderId">Recommended bidder</Label><select id="recommendedBidderId" className="h-9 w-full rounded-lg border bg-background px-2 text-sm" value={values.recommendedBidderId} onChange={(event) => { setValue("recommendedBidderId", event.target.value); setValue("recommendedVendorId", ""); }}><option value="">No recommendation</option>{bidders.map((bidder) => <option key={bidder.id} value={bidder.id}>{bidder.companyName || bidder.vendor?.name}</option>)}</select>{bidders.length === 0 && <p className="text-sm text-muted-foreground">Please add a bidder in Bidder Management before selecting a recommended bidder.</p>}</div><div className="space-y-2"><Label htmlFor="selectionRationale">Selection rationale</Label><Textarea id="selectionRationale" value={values.selectionRationale} onChange={(event) => setValue("selectionRationale", event.target.value)} aria-invalid={Boolean(errors.selectionRationale)} />{errors.selectionRationale && <p className="text-sm text-destructive">{errors.selectionRationale}</p>}</div></CardContent></Card>
-    <Card id="bidder-management" className="scroll-mt-40 order-4">
-      <CardHeader><CardTitle>Bidder Management</CardTitle></CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-            <div className="space-y-2">
-              <Label htmlFor="company-selection">Company</Label>
-              <select
-                id="company-selection"
-                className="h-10 w-full rounded-lg border bg-background px-3 text-sm"
-                value={companySelection}
-                onChange={(event) => {
-                  const selection = event.target.value;
-                  setCompanySelection(selection);
-                  if (selection === "__new__") setNewVendor("");
-                  else if (selection) {
-                    setNewVendor(selection);
-                    setNewCompany(emptyCompanyDetails);
-                  } else {
-                    setNewVendor("");
-                  }
-                }}
-              >
-                <option value="">Select Company</option>
-                {(refs?.vendors ?? [])
-                  .filter((vendor) => !bidders.some((bidder) => bidder.vendorId === vendor.id))
-                  .map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
-                <option value="__new__">New Company</option>
-              </select>
-            </div>
-            <Button
-              size="lg"
-              className="h-10 w-full sm:w-auto sm:min-w-36"
-              onClick={() => void addBidder()}
-              disabled={!companySelection}
-            >
-              <Plus />Add bidder
-            </Button>
-          </div>
-          {companySelection === "__new__" && (
-            <CompanyDetailsFields
-              value={newCompany}
-              onChange={setNewCompany}
-              idPrefix="new-company"
-              className="grid gap-3 rounded-lg border bg-muted/20 p-4 md:grid-cols-2"
-            />
-          )}
-          {companySelection && companySelection !== "__new__" && (() => {
-            const company = refs?.vendors.find((vendor) => vendor.id === companySelection);
-            if (!company) return null;
-            const details = companyContactFields(company.contactDetails);
-            return (
-              <div className="rounded-lg border bg-muted/20 p-4" aria-live="polite">
-                <p className="font-medium">{company.name}</p>
-                <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
-                  <div><dt className="text-muted-foreground">Contact Person</dt><dd>{details.contactPerson || "—"}</dd></div>
-                  <div><dt className="text-muted-foreground">Email</dt><dd>{details.email || "—"}</dd></div>
-                  <div><dt className="text-muted-foreground">Phone</dt><dd>{details.phone || "—"}</dd></div>
-                  <div className="sm:col-span-2"><dt className="text-muted-foreground">Qualification / Experience</dt><dd className="whitespace-pre-wrap">{details.qualifications || "—"}</dd></div>
-                </dl>
-              </div>
-            );
-          })()}
-        </div>
-        {bidders.length === 0 && <p className="text-sm text-muted-foreground">Choose a company above and select Add bidder to get started.</p>}
-        {bidders.map((bidder) => {
-          const draft = quotationDrafts[bidder.id] ?? { amount: "", notes: "" };
-          return <div key={bidder.id} className="space-y-4 rounded-lg border p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div><p className="font-semibold">{bidder.companyName || bidder.vendor?.name}</p><p className="text-xs text-muted-foreground">Bidder {bidder.sortOrder + 1}</p></div>
-              <div className="flex flex-wrap gap-1"><Button size="sm" variant="outline" onClick={() => void editBidder(bidder)}>Edit details</Button><Button size="sm" variant="ghost" className="text-destructive" onClick={() => void removeBidder(bidder)}><Trash2 />Remove</Button></div>
-            </div>
-            <div>
-              <h3 className="mb-2 font-medium">Quotations</h3>
-              {bidder.quotations.length === 0 ? <p className="text-sm text-muted-foreground">No quotations.</p> : <div className="space-y-2">{bidder.quotations.map((quotation) => <div key={quotation.id} className="flex flex-wrap items-center justify-between gap-2 rounded bg-muted/50 p-2 text-sm"><span>{quotation.currency?.code ?? "—"} {quotation.quotedAmount}{quotation.notes ? ` — ${quotation.notes}` : ""}</span><span className="flex gap-1"><Button size="sm" variant="ghost" onClick={() => void editQuotation(bidder, quotation)}>Edit</Button><Button size="sm" variant="ghost" className="text-destructive" onClick={() => void removeQuotation(bidder, quotation.id)}>Remove</Button></span></div>)}</div>}
-              <div className="mt-2 flex flex-col gap-2 sm:flex-row"><Input type="number" placeholder="Quoted amount" value={draft.amount} onChange={(event) => setQuotationDrafts((current) => ({ ...current, [bidder.id]: { ...draft, amount: event.target.value } }))} /><Input placeholder="Quotation description / notes" value={draft.notes} onChange={(event) => setQuotationDrafts((current) => ({ ...current, [bidder.id]: { ...draft, notes: event.target.value } }))} /><Button size="lg" variant="outline" className="h-10 sm:flex-none" onClick={() => void addQuotation(bidder)}><Plus />Add quotation</Button></div>
-            </div>
-            <div>
-              <h3 className="mb-2 font-medium">Evaluations</h3>
-              <div className="grid gap-3 md:grid-cols-2">
-                {(["TECHNICAL", "COMMERCIAL"] as const).map((type) => {
-                  const current = evals.find((item) => item.bidderId === bidder.id && item.type === type) ?? { bidderId: bidder.id, type, score: "", remarks: "" };
-                  return (
-                    <div key={type} className="space-y-2 rounded border p-3">
-                      <Label>{type === "TECHNICAL" ? "Technical evaluation" : "Commercial evaluation"}</Label>
-                      <Input type="number" placeholder="Score (optional)" value={current.score} onChange={(event) => setEvaluation(bidder.id, type, { score: event.target.value })} />
-                      <Textarea placeholder="Evaluation remarks" value={current.remarks} onChange={(event) => setEvaluation(bidder.id, type, { remarks: event.target.value })} />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>;
-        })}
-      </CardContent>
-    </Card>
-    <Card id="supporting-documents" className="scroll-mt-40 order-7"><CardHeader><CardTitle>Supporting documents</CardTitle></CardHeader><CardContent className="space-y-4"><AttachmentUploader formId={activeContractId} limits={attachmentLimits} onUploaded={() => setAttachmentRefresh((value) => value + 1)} onUploadStateChange={setAttachmentsUploading} onPreDraftPendingChange={updatePreDraftUploadsPending} />{activeContractId && <AttachmentList formId={activeContractId} refreshKey={attachmentRefresh} />}</CardContent></Card>
-    <Card id="approval-workflow" className="scroll-mt-40 order-8"><CardHeader><CardTitle>Approval Workflow</CardTitle></CardHeader><CardContent className="space-y-2"><p className="text-sm text-muted-foreground">Select the employees responsible for reviewing and approving this contract. Approvals will follow the sequence specified below.</p><Label htmlFor="contract-approver-search">Select an Approver</Label><ApproverSelect inputId="contract-approver-search" value={approverIds} onChange={setApproverIds} /></CardContent></Card>
-    <Card id="budget-information" className="scroll-mt-40 order-9">
-      <CardHeader><CardTitle>Budget and cost information</CardTitle></CardHeader>
-      <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">Tax is not configured; tax is 0.00.</p>
-        {costLines.map((line) => (
-          <div key={line.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2 text-sm">
-            <span>{line.description}: {line.quantity} × {line.unitCost} = {line.amount}</span>
-            <span>
-              <Button size="sm" variant="ghost" onClick={() => setCostDraft({ id: line.id, description: line.description, quantity: line.quantity ?? "", unitCost: line.unitCost ?? "", amount: line.amount })}>Edit</Button>
-              <Button size="sm" variant="ghost" className="text-destructive" onClick={() => void removeCostLine(line)}>Remove</Button>
-            </span>
-          </div>
-        ))}
-        <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
+  return (
+    <main className="min-h-screen bg-muted/30 p-4 sm:p-8">
+      <div className="mx-auto flex max-w-6xl flex-col gap-6">
+        {/* Page Header */}
+        <div className="flex flex-col gap-4 border-b border-border pb-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="font-medium">{costDraft.id ? "Edit cost item" : "Add a cost item"}</p>
-            <p className="mt-1 text-sm text-muted-foreground">Enter a description, quantity, and unit cost. The amount is calculated automatically.</p>
+            <Link href={returnTo} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+              <ArrowLeft className="size-4" />
+              Back
+            </Link>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <h1 className="text-3xl font-bold tracking-tight text-foreground">
+                {contract ? "Edit contract" : "New contract"}
+              </h1>
+              <span
+                className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+                  saveState === "Unable to save. Retry."
+                    ? "border-destructive/40 bg-destructive/10 text-destructive"
+                    : "border-border bg-card text-muted-foreground"
+                }`}
+              >
+                {saveState}
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {values.referenceNo ? `Reference: ${values.referenceNo}` : "Complete all required sections before submitting for approval."}
+            </p>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="space-y-2">
-              <Label htmlFor="cost-description">Description</Label>
-              <Input id="cost-description" placeholder="e.g. Installation services" value={costDraft.description} onChange={(event) => setCostDraft({ ...costDraft, description: event.target.value })} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="cost-quantity">Quantity</Label>
-              <Input id="cost-quantity" placeholder="Enter quantity" min="0" type="number" value={costDraft.quantity} onChange={(event) => { const quantity = event.target.value; setCostDraft({ ...costDraft, quantity, amount: quantity && costDraft.unitCost ? calculatedAmount(quantity, costDraft.unitCost) : "" }); }} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="cost-unit-cost">Unit cost</Label>
-              <Input id="cost-unit-cost" placeholder="Enter unit cost" min="0" type="number" value={costDraft.unitCost} onChange={(event) => { const unitCost = event.target.value; setCostDraft({ ...costDraft, unitCost, amount: costDraft.quantity && unitCost ? calculatedAmount(costDraft.quantity, unitCost) : "" }); }} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="cost-amount">Calculated amount</Label>
-              <Input id="cost-amount" readOnly placeholder="Calculated automatically" value={costDraft.amount} />
-            </div>
-          </div>
-          <div className="flex justify-end">
-            <Button size="lg" className="h-10 w-full sm:w-auto" onClick={() => void saveCostLine()}>
-              {costDraft.id ? <Save /> : <Plus />}
-              {costDraft.id ? "Save cost item" : "Add cost item"}
+          <div className="flex flex-wrap items-center gap-2.5">
+            {activeContractId && authUser && (
+              <CurrentPdfDownloadButton
+                formId={activeContractId}
+                referenceNo={(contract?.referenceNo ?? values.referenceNo) || null}
+                disabled={busy || saveInFlight.current !== null || saveState !== "All changes saved"}
+              />
+            )}
+            <Button variant="outline" onClick={() => void save()} disabled={busy || attachmentsUploading || saveInFlight.current !== null}>
+              <Save className="size-4" />
+              <span>Save draft</span>
+            </Button>
+            <Button onClick={() => void save(true)} disabled={busy || attachmentsUploading || preDraftUploadsPending || saveInFlight.current !== null}>
+              <Send className="size-4" />
+              <span>Submit for approval</span>
             </Button>
           </div>
         </div>
-        <div className="flex flex-wrap justify-end gap-x-6 gap-y-1 border-t pt-3 text-sm">
-          <span>Subtotal: {costTotal(costLines)}</span>
-          <span>Tax: 0.0000</span>
-          <strong>Total: {costTotal(costLines)}</strong>
-        </div>
-      </CardContent>
-    </Card>
-    {formSchema?.definition.sections.length ? (
-      <section id="custom-form-fields" className="scroll-mt-40">
-        <DynamicFormSections
-          definition={formSchema.definition}
-          values={dynamicValues}
-          errors={errors}
-          onChange={setDynamicValue}
-        />
-      </section>
-    ) : null}
-    <Dialog open={submitReviewOpen} onOpenChange={setSubmitReviewOpen}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Submit contract for approval?</DialogTitle>
-          <DialogDescription>
-            Review is complete. After submission, this contract will become read-only until it is returned for changes.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="rounded-lg border p-3 text-sm">
-          <p className="font-medium">{values.title || "Untitled contract"}</p>
-          <p className="mt-1 text-muted-foreground">{values.referenceNo || "Reference number will be assigned"}</p>
-          <p className="mt-1 text-muted-foreground">Approval levels: {approverIds.length}</p>
-        </div>
-        <DialogFooter>
-          <DialogClose render={<Button variant="outline" disabled={busy}>Cancel</Button>} />
-          <Button onClick={() => void save(true, true)} disabled={busy}><Send />Confirm and submit</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  </div></main>;
+
+        {/* Sticky Progress & Section Navigation */}
+        <section aria-label="Contract completion" className="sticky top-16 z-20 rounded-xl border border-border bg-card/95 p-4 shadow-sm backdrop-blur">
+          <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+            <span className="font-semibold tabular-nums">{completionPercent}% complete</span>
+            <span className="text-xs text-muted-foreground tabular-nums">{completionCount} of {completionItems.length} sections ready</span>
+          </div>
+          <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-muted">
+            <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${completionPercent}%` }} />
+          </div>
+          <nav aria-label="Contract form sections" className="flex gap-1.5 overflow-x-auto pb-0.5">
+            {[
+              ["project-identification", "1. Identification"],
+              ["project-description", "2. Description"],
+              ["contract-information", "3. Information"],
+              ["bidder-management", "4. Bidders"],
+              ["financial-information", "5. Financial"],
+              ["supporting-documents", "6. Documents"],
+              ["approval-workflow", "7. Approvals"],
+              ["budget-information", "8. Budget"],
+            ].map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                className="shrink-0 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
+        </section>
+
+        {attempted && Object.keys(errors).length > 0 && (
+          <div role="alert" className="scroll-mt-36 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+            <p className="font-semibold">Complete these items before submitting:</p>
+            <ul className="mt-2 list-inside list-disc space-y-1">
+              {Object.entries(errors).map(([field, message]) => (
+                <li key={field}>
+                  <button type="button" className="text-left underline underline-offset-2" onClick={() => goToError(field)}>
+                    {message}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Section 1 */}
+        <Card id="project-identification" className="scroll-mt-40 order-1 border-border bg-card">
+          <CardHeader className="border-b border-border/60 pb-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Section 01</p>
+            <CardTitle className="text-lg font-semibold">Project identification</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-5 pt-5 md:grid-cols-2">
+            {input("title", "Project name / contractor / contract title")}
+            {input("referenceNo", "Reference number", "text", true)}
+          </CardContent>
+        </Card>
+
+        {/* Section 2 */}
+        <Card id="project-description" className="scroll-mt-40 order-2 border-border bg-card">
+          <CardHeader className="border-b border-border/60 pb-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Section 02</p>
+            <CardTitle className="text-lg font-semibold">Project description</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-5">
+            <div className="space-y-1.5">
+              <Label htmlFor="scope" className="text-sm font-medium">Scope of work</Label>
+              <Textarea
+                id="scope"
+                className="min-h-28"
+                value={values.scope}
+                onChange={(event) => setValue("scope", event.target.value)}
+                aria-invalid={Boolean(errors.scope)}
+              />
+              {errors.scope && <p className="text-xs text-destructive">{errors.scope}</p>}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Section 3 */}
+        <Card id="contract-information" className="scroll-mt-40 order-3 border-border bg-card">
+          <CardHeader className="border-b border-border/60 pb-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Section 03</p>
+            <CardTitle className="text-lg font-semibold">Contract information</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-5 pt-5 md:grid-cols-2">
+            {select("sponsorDepartmentId", "Sponsor department", refs?.departments ?? [], "Select department")}
+            {select("contractCategoryId", "Contract category", refs?.categories ?? [], "Select category")}
+            <div className="space-y-1.5 md:col-span-2">
+              <Label htmlFor="procurementRationale" className="text-sm font-medium">Sourcing / procurement rationale</Label>
+              <Textarea
+                id="procurementRationale"
+                className="min-h-24"
+                value={values.procurementRationale}
+                onChange={(event) => setValue("procurementRationale", event.target.value)}
+                aria-invalid={Boolean(errors.procurementRationale)}
+              />
+              {errors.procurementRationale && <p className="text-xs text-destructive">{errors.procurementRationale}</p>}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Section 5 (ordered after Bidders) */}
+        <Card id="financial-information" className="scroll-mt-40 order-5 border-border bg-card">
+          <CardHeader className="border-b border-border/60 pb-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Section 05</p>
+            <CardTitle className="text-lg font-semibold">Financial and vendor recommendation</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-5 pt-5 md:grid-cols-2">
+            {input("contractAmount", "Estimated contract amount", "number")}
+            {select("currencyId", "Currency", (refs?.currencies ?? []).map((item) => ({ id: item.id, name: `${item.code} - ${item.name}` })), "Select currency")}
+            <div className="space-y-1.5">
+              <Label htmlFor="recommendedBidderId" className="text-sm font-medium">Recommended bidder</Label>
+              <select
+                id="recommendedBidderId"
+                className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                value={values.recommendedBidderId}
+                onChange={(event) => { setValue("recommendedBidderId", event.target.value); setValue("recommendedVendorId", ""); }}
+              >
+                <option value="">No recommendation</option>
+                {bidders.map((bidder) => <option key={bidder.id} value={bidder.id}>{bidder.companyName || bidder.vendor?.name}</option>)}
+              </select>
+              {bidders.length === 0 && <p className="text-xs text-muted-foreground">Please add a bidder in Bidder Management before selecting a recommended bidder.</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="selectionRationale" className="text-sm font-medium">Selection rationale</Label>
+              <Textarea
+                id="selectionRationale"
+                value={values.selectionRationale}
+                onChange={(event) => setValue("selectionRationale", event.target.value)}
+                aria-invalid={Boolean(errors.selectionRationale)}
+              />
+              {errors.selectionRationale && <p className="text-xs text-destructive">{errors.selectionRationale}</p>}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Section 4 */}
+        <Card id="bidder-management" className="scroll-mt-40 order-4 border-border bg-card">
+          <CardHeader className="border-b border-border/60 pb-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Section 04</p>
+            <CardTitle className="text-lg font-semibold">Bidder management</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5 pt-5">
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                <div className="space-y-1.5">
+                  <Label htmlFor="company-selection" className="text-sm font-medium">Company</Label>
+                  <select
+                    id="company-selection"
+                    className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    value={companySelection}
+                    onChange={(event) => {
+                      const selection = event.target.value;
+                      setCompanySelection(selection);
+                      if (selection === "__new__") setNewVendor("");
+                      else if (selection) {
+                        setNewVendor(selection);
+                        setNewCompany(emptyCompanyDetails);
+                      } else {
+                        setNewVendor("");
+                      }
+                    }}
+                  >
+                    <option value="">Select Company</option>
+                    {(refs?.vendors ?? [])
+                      .filter((vendor) => !bidders.some((bidder) => bidder.vendorId === vendor.id))
+                      .map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
+                    <option value="__new__">New Company</option>
+                  </select>
+                </div>
+                <Button
+                  size="lg"
+                  className="h-10 w-full sm:w-auto sm:min-w-36"
+                  onClick={() => void addBidder()}
+                  disabled={!companySelection}
+                >
+                  <Plus className="size-4" />Add bidder
+                </Button>
+              </div>
+              {companySelection === "__new__" && (
+                <CompanyDetailsFields
+                  value={newCompany}
+                  onChange={setNewCompany}
+                  idPrefix="new-company"
+                  className="grid gap-3 rounded-lg border border-border bg-muted/20 p-4 md:grid-cols-2"
+                />
+              )}
+              {companySelection && companySelection !== "__new__" && (() => {
+                const company = refs?.vendors.find((vendor) => vendor.id === companySelection);
+                if (!company) return null;
+                const details = companyContactFields(company.contactDetails);
+                return (
+                  <div className="rounded-lg border border-border bg-muted/20 p-4" aria-live="polite">
+                    <p className="font-medium">{company.name}</p>
+                    <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+                      <div><dt className="text-xs text-muted-foreground">Contact Person</dt><dd>{details.contactPerson || "—"}</dd></div>
+                      <div><dt className="text-xs text-muted-foreground">Email</dt><dd>{details.email || "—"}</dd></div>
+                      <div><dt className="text-xs text-muted-foreground">Phone</dt><dd>{details.phone || "—"}</dd></div>
+                      <div className="sm:col-span-2"><dt className="text-xs text-muted-foreground">Qualification / Experience</dt><dd className="whitespace-pre-wrap">{details.qualifications || "—"}</dd></div>
+                    </dl>
+                  </div>
+                );
+              })()}
+            </div>
+            {bidders.length === 0 && (
+              <p className="rounded-lg border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
+                Choose a company above and select Add bidder to get started.
+              </p>
+            )}
+            {bidders.map((bidder) => {
+              const draft = quotationDrafts[bidder.id] ?? { amount: "", notes: "" };
+              return (
+                <div key={bidder.id} className="space-y-4 rounded-xl border border-border bg-background p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-3">
+                    <div>
+                      <p className="font-semibold text-foreground">{bidder.companyName || bidder.vendor?.name}</p>
+                      <p className="text-xs text-muted-foreground">Bidder {bidder.sortOrder + 1}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <Button size="sm" variant="outline" onClick={() => void editBidder(bidder)}>Edit details</Button>
+                      <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => void removeBidder(bidder)}>
+                        <Trash2 className="size-3.5" />Remove
+                      </Button>
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className="mb-2 text-sm font-semibold">Quotations</h3>
+                    {bidder.quotations.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No quotations recorded.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {bidder.quotations.map((quotation) => (
+                          <div key={quotation.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-sm">
+                            <span className="tabular-nums">
+                              <strong>{quotation.currency?.code ?? "—"} {quotation.quotedAmount}</strong>
+                              {quotation.notes ? ` — ${quotation.notes}` : ""}
+                            </span>
+                            <span className="flex gap-1">
+                              <Button size="sm" variant="ghost" onClick={() => void editQuotation(bidder, quotation)}>Edit</Button>
+                              <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => void removeQuotation(bidder, quotation.id)}>Remove</Button>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                      <Input
+                        type="number"
+                        className="h-10"
+                        placeholder="Quoted amount"
+                        value={draft.amount}
+                        onChange={(event) => setQuotationDrafts((current) => ({ ...current, [bidder.id]: { ...draft, amount: event.target.value } }))}
+                      />
+                      <Input
+                        className="h-10"
+                        placeholder="Quotation description / notes"
+                        value={draft.notes}
+                        onChange={(event) => setQuotationDrafts((current) => ({ ...current, [bidder.id]: { ...draft, notes: event.target.value } }))}
+                      />
+                      <Button size="lg" variant="outline" className="h-10 sm:flex-none" onClick={() => void addQuotation(bidder)}>
+                        <Plus className="size-4" />Add quotation
+                      </Button>
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className="mb-2 text-sm font-semibold">Evaluations</h3>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {(["TECHNICAL", "COMMERCIAL"] as const).map((type) => {
+                        const current = evals.find((item) => item.bidderId === bidder.id && item.type === type) ?? { bidderId: bidder.id, type, score: "", remarks: "" };
+                        return (
+                          <div key={type} className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
+                            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                              {type === "TECHNICAL" ? "Technical evaluation" : "Commercial evaluation"}
+                            </Label>
+                            <Input type="number" className="h-9 bg-background" placeholder="Score (optional)" value={current.score} onChange={(event) => setEvaluation(bidder.id, type, { score: event.target.value })} />
+                            <Textarea className="bg-background" placeholder="Evaluation remarks" value={current.remarks} onChange={(event) => setEvaluation(bidder.id, type, { remarks: event.target.value })} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+
+        {/* Section 6 */}
+        <Card id="supporting-documents" className="scroll-mt-40 order-7 border-border bg-card">
+          <CardHeader className="border-b border-border/60 pb-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Section 06</p>
+            <CardTitle className="text-lg font-semibold">Supporting documents</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-5">
+            <AttachmentUploader formId={activeContractId} limits={attachmentLimits} onUploaded={() => setAttachmentRefresh((value) => value + 1)} onUploadStateChange={setAttachmentsUploading} onPreDraftPendingChange={updatePreDraftUploadsPending} />
+            {activeContractId && <AttachmentList formId={activeContractId} refreshKey={attachmentRefresh} />}
+          </CardContent>
+        </Card>
+
+        {/* Section 7 */}
+        <Card id="approval-workflow" className="scroll-mt-40 order-8 border-border bg-card">
+          <CardHeader className="border-b border-border/60 pb-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Section 07</p>
+            <CardTitle className="text-lg font-semibold">Approval workflow</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 pt-5">
+            <p className="text-sm text-muted-foreground">Select the employees responsible for reviewing and approving this contract. Approvals will follow the sequence specified below.</p>
+            <div className="space-y-1.5">
+              <Label htmlFor="contract-approver-search" className="text-sm font-medium">Select an Approver</Label>
+              <ApproverSelect inputId="contract-approver-search" value={approverIds} onChange={setApproverIds} />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Section 8 */}
+        <Card id="budget-information" className="scroll-mt-40 order-9 border-border bg-card">
+          <CardHeader className="border-b border-border/60 pb-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Section 08</p>
+            <CardTitle className="text-lg font-semibold">Budget and cost information</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5 pt-5">
+            <p className="text-xs text-muted-foreground">Tax is not configured; tax is 0.00.</p>
+            {costLines.length > 0 && (
+              <div className="divide-y divide-border rounded-lg border border-border">
+                {costLines.map((line) => (
+                  <div key={line.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
+                    <div>
+                      <p className="font-medium text-foreground">{line.description}</p>
+                      <p className="text-xs text-muted-foreground tabular-nums">
+                        {line.quantity} × {line.unitCost} = <strong className="text-foreground">{line.amount}</strong>
+                      </p>
+                    </div>
+                    <div className="flex gap-1">
+                      <Button size="sm" variant="ghost" onClick={() => setCostDraft({ id: line.id, description: line.description, quantity: line.quantity ?? "", unitCost: line.unitCost ?? "", amount: line.amount })}>Edit</Button>
+                      <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => void removeCostLine(line)}>Remove</Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="space-y-4 rounded-xl border border-border bg-muted/20 p-4">
+              <div>
+                <p className="font-semibold text-sm">{costDraft.id ? "Edit cost item" : "Add a cost item"}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">Enter a description, quantity, and unit cost. The amount is calculated automatically.</p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="cost-description">Description</Label>
+                  <Input id="cost-description" className="h-10 bg-background" placeholder="e.g. Installation services" value={costDraft.description} onChange={(event) => setCostDraft({ ...costDraft, description: event.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="cost-quantity">Quantity</Label>
+                  <Input id="cost-quantity" className="h-10 bg-background" placeholder="Enter quantity" min="0" type="number" value={costDraft.quantity} onChange={(event) => { const quantity = event.target.value; setCostDraft({ ...costDraft, quantity, amount: quantity && costDraft.unitCost ? calculatedAmount(quantity, costDraft.unitCost) : "" }); }} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="cost-unit-cost">Unit cost</Label>
+                  <Input id="cost-unit-cost" className="h-10 bg-background" placeholder="Enter unit cost" min="0" type="number" value={costDraft.unitCost} onChange={(event) => { const unitCost = event.target.value; setCostDraft({ ...costDraft, unitCost, amount: costDraft.quantity && unitCost ? calculatedAmount(costDraft.quantity, unitCost) : "" }); }} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="cost-amount">Calculated amount</Label>
+                  <Input id="cost-amount" className="h-10 bg-muted tabular-nums" readOnly placeholder="Calculated automatically" value={costDraft.amount} />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <Button size="lg" className="h-10 w-full sm:w-auto" onClick={() => void saveCostLine()}>
+                  {costDraft.id ? <Save className="size-4" /> : <Plus className="size-4" />}
+                  {costDraft.id ? "Save cost item" : "Add cost item"}
+                </Button>
+              </div>
+            </div>
+            <div className="flex flex-wrap justify-end gap-x-8 gap-y-2 rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm tabular-nums">
+              <span className="text-muted-foreground">Subtotal: <strong className="text-foreground">{costTotal(costLines)}</strong></span>
+              <span className="text-muted-foreground">Tax: <strong className="text-foreground">0.0000</strong></span>
+              <span className="text-base font-bold text-foreground">Total: {costTotal(costLines)}</span>
+            </div>
+          </CardContent>
+        </Card>
+
+        {formSchema?.definition.sections.length ? (
+          <section id="custom-form-fields" className="scroll-mt-40">
+            <DynamicFormSections
+              definition={formSchema.definition}
+              values={dynamicValues}
+              errors={errors}
+              onChange={setDynamicValue}
+            />
+          </section>
+        ) : null}
+
+        <Dialog open={submitReviewOpen} onOpenChange={setSubmitReviewOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Submit contract for approval?</DialogTitle>
+              <DialogDescription>
+                Review is complete. After submission, this contract will become read-only until it is returned for changes.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm">
+              <p className="font-medium">{values.title || "Untitled contract"}</p>
+              <p className="mt-1 font-mono text-xs text-muted-foreground">{values.referenceNo || "Reference number will be assigned"}</p>
+              <p className="mt-1 text-muted-foreground">Approval levels: {approverIds.length}</p>
+            </div>
+            <DialogFooter>
+              <DialogClose render={<Button variant="outline" disabled={busy}>Cancel</Button>} />
+              <Button onClick={() => void save(true, true)} disabled={busy}>
+                <Send className="size-4" />
+                Confirm and submit
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </main>
+  );
 }

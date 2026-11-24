@@ -11,6 +11,8 @@
 
 The `POST /api/forms/:formId/final-pdf` endpoint lets an authorized Admin or assigned Approver download a ZIP containing `Contract_Form.pdf` and the contract's supporting files. It reuses the stored final PDF when present; otherwise, it calls the existing approved-only PDF service and stores one `GENERATED_PDF` attachment before packaging. The final PDF remains available separately in the contract's attachment list. PDF/Drive failure does not roll back approval; the approval response reports the failure and an administrator can retry through this package endpoint.
 
+The contract creator can download a PDF snapshot of the current saved form at any status with `GET /api/forms/:formId/pdf`. This snapshot is generated on demand and is not stored as a final attachment. For approved forms, the creator (including a Submitter), an assigned Approver, or Admin can use `POST /api/forms/:formId/final-pdf/generate` to create or retrieve the official stored final PDF; the client then downloads it through the normal authorized attachment route. This operation does not repeat approval.
+
 ## Required Sections (14)
 | # | Section | Expected data source |
 |---|---|---|

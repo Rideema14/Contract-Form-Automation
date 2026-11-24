@@ -1,11 +1,75 @@
-import { API_BASE_URL, ApiError, apiGet } from "@/lib/api-client";
+import { API_BASE_URL, ApiError, apiGet, apiPost } from "@/lib/api-client";
 import type { ApiErrorResponse, ApiSuccessResponse } from "@/types/api";
 import type { Attachment, UploadableCategory, UploadLimits } from "./types";
 
 const base = (formId: string) => `/forms/${encodeURIComponent(formId)}/attachments`;
 
+function safeReference(referenceNo: string | null, formId: string): string {
+  return (referenceNo ?? formId)
+    .normalize("NFKC")
+    .replace(/[^\p{L}\p{N}._-]+/gu, "_")
+    .replace(/^[._-]+|[._-]+$/g, "")
+    .slice(0, 100) || formId;
+}
+
+function saveBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+async function throwDownloadError(response: Response, fallback: string): Promise<never> {
+  const payload: unknown = await response.json().catch(() => undefined);
+  const error: ApiErrorResponse =
+    payload && typeof payload === "object" && "message" in payload
+      ? (payload as ApiErrorResponse)
+      : { success: false, message: `${fallback} (${response.status})`, error: { code: "HTTP_ERROR", details: [] } };
+  throw new ApiError(error, response.status);
+}
+
 export function getAttachmentLimits(formId: string): Promise<UploadLimits> {
   return apiGet<UploadLimits>(`/forms/${encodeURIComponent(formId)}/attachments/config`);
+}
+
+export async function downloadCurrentContractPdf(
+  formId: string,
+  referenceNo: string | null,
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/forms/${encodeURIComponent(formId)}/pdf`, {
+    credentials: "include",
+    cache: "no-store",
+  });
+  if (!response.ok) await throwDownloadError(response, "PDF download failed");
+
+  if (response.headers.get("content-type")?.split(";")[0].trim() !== "application/pdf") {
+    throw new ApiError(
+      { success: false, message: "The server did not return a PDF.", error: { code: "INVALID_PDF_RESPONSE", details: [] } },
+      response.status,
+    );
+  }
+
+  const blob = await response.blob();
+  if (blob.size === 0) {
+    throw new ApiError(
+      { success: false, message: "The server returned an empty PDF.", error: { code: "EMPTY_PDF", details: [] } },
+      response.status,
+    );
+  }
+
+  saveBlob(blob, `Contract_${safeReference(referenceNo, formId)}_Current.pdf`);
+}
+
+export async function generateAndDownloadFinalPdf(formId: string): Promise<void> {
+  const attachment = await apiPost<Attachment>(
+    `/forms/${encodeURIComponent(formId)}/final-pdf/generate`,
+    {},
+  );
+  await downloadAttachment(formId, attachment);
 }
 
 export async function downloadFinalPdfPackage(
@@ -17,12 +81,7 @@ export async function downloadFinalPdfPackage(
     credentials: "include",
   });
   if (!response.ok) {
-    const payload: unknown = await response.json().catch(() => undefined);
-    const error: ApiErrorResponse =
-      payload && typeof payload === "object" && "message" in payload
-        ? (payload as ApiErrorResponse)
-        : { success: false, message: `Package generation failed (${response.status})`, error: { code: "HTTP_ERROR", details: [] } };
-    throw new ApiError(error, response.status);
+    await throwDownloadError(response, "Package generation failed");
   }
 
   if (response.headers.get("content-type")?.split(";")[0].trim() !== "application/zip") {
@@ -40,19 +99,7 @@ export async function downloadFinalPdfPackage(
     );
   }
 
-  const safeReference = (referenceNo ?? formId)
-    .normalize("NFKC")
-    .replace(/[^\p{L}\p{N}._-]+/gu, "_")
-    .replace(/^[._-]+|[._-]+$/g, "")
-    .slice(0, 100) || formId;
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `Contract_${safeReference}_Full_Package.zip`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  saveBlob(blob, `Contract_${safeReference(referenceNo, formId)}_Full_Package.zip`);
 }
 
 export function listAttachments(formId: string): Promise<Attachment[]> {
@@ -120,10 +167,5 @@ export async function downloadAttachment(formId: string, attachment: Attachment)
       response.status,
     );
   }
-  const url = URL.createObjectURL(await response.blob());
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = attachment.fileName;
-  link.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  saveBlob(await response.blob(), attachment.fileName);
 }

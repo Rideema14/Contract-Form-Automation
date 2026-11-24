@@ -2,18 +2,19 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   ChevronLeft,
   ChevronRight,
   Eye,
-  LogOut,
+  FileText,
   Pencil,
   Plus,
   RefreshCw,
   Search,
   Trash2,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -56,7 +57,6 @@ import {
 } from "@/components/ui/table";
 import { ApiError } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
-import { logout } from "@/services/auth";
 import { deleteContract, listContracts } from "@/services/contracts";
 import type {
   Contract,
@@ -73,6 +73,12 @@ const statusLabels: Record<ContractStatus, string> = {
   APPROVED: "Approved",
   REJECTED: "Rejected",
 };
+
+function statusBadgeVariant(status: ContractStatus): "default" | "secondary" | "outline" {
+  if (status === "APPROVED") return "default";
+  if (status === "DRAFT") return "secondary";
+  return "outline";
+}
 
 function formatAmount(contract: Contract): string {
   if (contract.contractAmount === null) return "—";
@@ -93,7 +99,6 @@ function getErrorMessage(error: unknown): string {
 }
 
 export default function ContractsPage() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const { authUser } = useAuth();
   const [contracts, setContracts] = useState<Contract[]>([]);
@@ -118,8 +123,8 @@ export default function ContractsPage() {
   const [deletionReason, setDeletionReason] = useState("");
   const [deletionConfirmed, setDeletionConfirmed] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const isAdmin = authUser?.role === "ADMIN";
+  const hasActiveFilters = Boolean(query) || status !== "ALL";
 
   const loadContracts = useCallback(async () => {
     setIsLoading(true);
@@ -168,6 +173,13 @@ export default function ContractsPage() {
     setPage(1);
   }
 
+  function resetFilters() {
+    setSearch("");
+    setQuery("");
+    setStatus("ALL");
+    setPage(1);
+  }
+
   async function confirmDelete() {
     const canDelete =
       isAdmin ||
@@ -209,76 +221,77 @@ export default function ContractsPage() {
     }
   }
 
-  async function handleLogout() {
-    setIsLoggingOut(true);
-    try {
-      await logout();
-      router.replace("/login");
-    } catch (logoutError) {
-      toast.error(
-        logoutError instanceof ApiError
-          ? logoutError.message
-          : "Could not sign out.",
-      );
-    } finally {
-      setIsLoggingOut(false);
-    }
-  }
-
   return (
-    <main className="min-h-screen bg-muted/30 p-4 sm:p-6 lg:p-10">
+    <main className="min-h-screen bg-muted/30 p-4 sm:p-8">
       <div className="mx-auto flex max-w-7xl flex-col gap-6">
-        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        {/* Page Header */}
+        <div className="flex flex-col justify-between gap-4 border-b border-border pb-6 sm:flex-row sm:items-center">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">My forms</h1>
-            <p className="text-muted-foreground">
-              View and manage your contract forms.
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Register
+            </p>
+            <h1 className="mt-1 text-3xl font-bold tracking-tight text-foreground">
+              {isAdmin ? "All contracts" : "My contract forms"}
+            </h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Search, filter, and inspect contract forms across every workflow stage.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2.5">
             <Button
               type="button"
               variant="outline"
-              onClick={() => void handleLogout()}
-              disabled={isLoggingOut}
+              onClick={() => void loadContracts()}
+              disabled={isLoading}
             >
-              <LogOut data-icon="inline-start" />
-              {isLoggingOut ? "Signing out..." : "Sign out"}
+              <RefreshCw className={`size-4 ${isLoading ? "animate-spin" : ""}`} />
+              Refresh
             </Button>
             <NewContractLink className={buttonVariants()}>
-              <Plus data-icon="inline-start" />
+              <Plus className="size-4" />
               New contract
             </NewContractLink>
           </div>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Contract register</CardTitle>
-            <CardDescription>
-              Search your forms and filter them by workflow status.
-            </CardDescription>
+        <Card className="border-border bg-card">
+          <CardHeader className="flex flex-col gap-2 border-b border-border/60 pb-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle className="text-lg font-semibold">Contract register</CardTitle>
+              <CardDescription>
+                Filter by workflow status or search by contract title and reference number.
+              </CardDescription>
+            </div>
+            {!isLoading && !error && (
+              <Badge variant="outline" className="w-fit font-mono text-xs">
+                {pagination.totalItems} {pagination.totalItems === 1 ? "form" : "forms"}
+              </Badge>
+            )}
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-5 pt-5">
             <form
               className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_13rem_auto_auto] sm:items-end"
               onSubmit={submitSearch}
             >
-              <div className="min-w-0 space-y-2">
-                <Label htmlFor="contract-search">Search</Label>
+              <div className="min-w-0 space-y-1.5">
+                <Label htmlFor="contract-search" className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Search
+                </Label>
                 <div className="relative">
-                  <Search className="absolute top-2 left-2.5 size-4 text-muted-foreground" />
+                  <Search className="pointer-events-none absolute top-3 left-3 size-4 text-muted-foreground" />
                   <Input
                     id="contract-search"
-                    className="h-10 pl-8"
-                    placeholder="Title or reference number"
+                    className="h-10 pl-9"
+                    placeholder="Title or reference number..."
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
                   />
                 </div>
               </div>
-              <div className="min-w-0 space-y-2">
-                <Label htmlFor="contract-status">Status</Label>
+              <div className="min-w-0 space-y-1.5">
+                <Label htmlFor="contract-status" className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Status
+                </Label>
                 <Select value={status} onValueChange={changeStatus}>
                   <SelectTrigger id="contract-status" className="h-10 w-full">
                     <SelectValue />
@@ -293,19 +306,20 @@ export default function ContractsPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <Button type="submit" variant="outline" className="h-10">
+              <Button type="submit" className="h-10">
                 Search
               </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="size-10"
-                aria-label="Refresh contracts"
-                onClick={() => void loadContracts()}
-              >
-                <RefreshCw className={isLoading ? "animate-spin" : ""} />
-              </Button>
+              {hasActiveFilters && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10"
+                  onClick={resetFilters}
+                >
+                  <X className="size-4" />
+                  Clear
+                </Button>
+              )}
             </form>
 
             {error ? (
@@ -325,19 +339,36 @@ export default function ContractsPage() {
               </div>
             ) : isLoading ? (
               <div className="space-y-3" aria-label="Loading contracts">
-                {[1, 2, 3].map((item) => (
+                {[1, 2, 3, 4].map((item) => (
                   <div
                     key={item}
-                    className="h-12 animate-pulse rounded-md bg-muted"
+                    className="h-14 animate-pulse rounded-lg bg-muted"
                   />
                 ))}
               </div>
             ) : contracts.length === 0 ? (
-              <div className="rounded-lg border border-dashed p-10 text-center">
-                <p className="font-medium">No contracts found</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Try changing your search or create a new contract.
-                </p>
+              <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border p-12 text-center">
+                <div className="flex size-11 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                  <FileText className="size-5" />
+                </div>
+                <div className="space-y-1">
+                  <p className="font-medium text-foreground">No contracts found</p>
+                  <p className="text-sm text-muted-foreground">
+                    {hasActiveFilters
+                      ? "No contract forms match your current search or status filter."
+                      : "Get started by creating your first contract form."}
+                  </p>
+                </div>
+                {hasActiveFilters ? (
+                  <Button type="button" variant="outline" size="sm" onClick={resetFilters}>
+                    Reset filters
+                  </Button>
+                ) : (
+                  <NewContractLink className={buttonVariants({ size: "sm" })}>
+                    <Plus className="size-4" />
+                    New contract
+                  </NewContractLink>
+                )}
               </div>
             ) : (
               <>
@@ -349,14 +380,21 @@ export default function ContractsPage() {
                     (authUser?.role === "SUBMITTER" &&
                       contract.createdById === authUser.id);
                   return (
-                    <Card key={`mobile-${contract.id}`}>
+                    <Card key={`mobile-${contract.id}`} className="border-border">
                       <CardContent className="space-y-3 p-4">
                         <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="font-medium break-words">{contract.title || "Untitled contract"}</p>
-                            <p className="text-xs text-muted-foreground">{contract.referenceNo || "No reference number"}</p>
+                          <div className="min-w-0 space-y-1">
+                            <Link
+                              href={`/contracts/${contract.id}?return=${encodeURIComponent("/contracts")}`}
+                              className="block font-medium break-words hover:underline"
+                            >
+                              {contract.title || "Untitled contract"}
+                            </Link>
+                            <p className="font-mono text-xs text-muted-foreground">
+                              {contract.referenceNo || "No reference number"}
+                            </p>
                           </div>
-                          <Badge variant={contract.status === "REJECTED" ? "destructive" : contract.status === "DRAFT" ? "secondary" : "outline"}>
+                          <Badge variant={statusBadgeVariant(contract.status)}>
                             {statusLabels[contract.status]}
                           </Badge>
                         </div>
@@ -364,18 +402,18 @@ export default function ContractsPage() {
                           <span>Amount: {formatAmount(contract)}</span>
                           <span>Updated: {formatDate(contract.updatedAt)}</span>
                         </div>
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2 pt-1">
                           <Link href={`/contracts/${contract.id}?return=${encodeURIComponent("/contracts")}`} className={buttonVariants({ variant: "outline", size: "sm" })}>
-                            <Eye />View
+                            <Eye className="size-3.5" />View
                           </Link>
                           {isDraft && (
                             <Link href={`/contracts/${contract.id}?edit=1&return=${encodeURIComponent("/contracts")}`} className={buttonVariants({ variant: "outline", size: "sm" })}>
-                              <Pencil />Edit
+                              <Pencil className="size-3.5" />Edit
                             </Link>
                           )}
                           {isDraft && canDelete && (
                             <Button type="button" variant="destructive" size="sm" onClick={() => setDeleteTarget(contract)}>
-                              <Trash2 />Delete
+                              <Trash2 className="size-3.5" />Delete
                             </Button>
                           )}
                         </div>
@@ -384,17 +422,17 @@ export default function ContractsPage() {
                   );
                 })}
               </div>
-              <div className="hidden overflow-x-auto md:block">
+              <div className="hidden overflow-x-auto rounded-lg border border-border md:block">
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>Contract</TableHead>
-                    <TableHead>Amount</TableHead>
-                    <TableHead>Department</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Updated</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                  <TableRow className="bg-muted/40 hover:bg-muted/40">
+                    <TableHead className="font-semibold">Contract</TableHead>
+                    <TableHead className="font-semibold">Amount</TableHead>
+                    <TableHead className="font-semibold">Department</TableHead>
+                    <TableHead className="font-semibold">Category</TableHead>
+                    <TableHead className="font-semibold">Status</TableHead>
+                    <TableHead className="font-semibold">Updated</TableHead>
+                    <TableHead className="text-right font-semibold">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -405,16 +443,21 @@ export default function ContractsPage() {
                       (authUser?.role === "SUBMITTER" &&
                         contract.createdById === authUser.id);
                     return (
-                      <TableRow key={contract.id}>
-                        <TableCell className="min-w-52">
-                          <div className="font-medium">
+                      <TableRow key={contract.id} className="hover:bg-muted/30">
+                        <TableCell className="min-w-56">
+                          <Link
+                            href={`/contracts/${contract.id}?return=${encodeURIComponent("/contracts")}`}
+                            className="block font-medium text-foreground hover:underline"
+                          >
                             {contract.title || "Untitled contract"}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
+                          </Link>
+                          <div className="mt-0.5 font-mono text-xs text-muted-foreground">
                             {contract.referenceNo || "No reference number"}
                           </div>
                         </TableCell>
-                        <TableCell>{formatAmount(contract)}</TableCell>
+                        <TableCell className="tabular-nums whitespace-nowrap">
+                          {formatAmount(contract)}
+                        </TableCell>
                         <TableCell>
                           {contract.sponsorDepartment?.name ??
                             contract.sponsorDepartmentId ??
@@ -426,19 +469,13 @@ export default function ContractsPage() {
                             "—"}
                         </TableCell>
                         <TableCell>
-                          <Badge
-                            variant={
-                              contract.status === "REJECTED"
-                                ? "destructive"
-                                : contract.status === "DRAFT"
-                                  ? "secondary"
-                                  : "outline"
-                            }
-                          >
+                          <Badge variant={statusBadgeVariant(contract.status)}>
                             {statusLabels[contract.status]}
                           </Badge>
                         </TableCell>
-                        <TableCell>{formatDate(contract.updatedAt)}</TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">
+                          {formatDate(contract.updatedAt)}
+                        </TableCell>
                         <TableCell>
                           <div className="flex justify-end gap-1">
                             <Link
@@ -453,19 +490,17 @@ export default function ContractsPage() {
                               <Eye />
                             </Link>
                             {isDraft && (
-                              <>
-                                <Link
-                                  href={`/contracts/${contract.id}?edit=1&return=${encodeURIComponent("/contracts")}`}
-                                  className={buttonVariants({
-                                    variant: "ghost",
-                                    size: "icon-sm",
-                                  })}
-                                  aria-label={`Edit ${contract.title || "contract"}`}
-                                  title="Edit draft"
-                                >
-                                  <Pencil />
-                                </Link>
-                              </>
+                              <Link
+                                href={`/contracts/${contract.id}?edit=1&return=${encodeURIComponent("/contracts")}`}
+                                className={buttonVariants({
+                                  variant: "ghost",
+                                  size: "icon-sm",
+                                })}
+                                aria-label={`Edit ${contract.title || "contract"}`}
+                                title="Edit draft"
+                              >
+                                <Pencil />
+                              </Link>
                             )}
                             {isDraft && canDelete && (
                               <Button
@@ -509,7 +544,7 @@ export default function ContractsPage() {
                     <ChevronLeft />
                     Previous
                   </Button>
-                  <span className="min-w-20 text-center">
+                  <span className="min-w-20 text-center tabular-nums">
                     Page {page} of {pagination.totalPages}
                   </span>
                   <Button

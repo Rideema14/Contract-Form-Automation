@@ -109,6 +109,7 @@ export class DocumentService {
           })
         );
       }
+      await repository.recordAuditEvents(created);
       return created;
     } catch (error) {
       const cleanupErrors: unknown[] = [];
@@ -203,8 +204,9 @@ export class DocumentService {
       contractFormId: input.contractFormId,
       contractFolderName: input.contractFolderName,
     });
+    let record: AttachmentRecord | undefined;
     try {
-      return await repository.create({
+      record = await repository.create({
         contractFormId: input.contractFormId,
         category: input.category,
         fileName,
@@ -215,11 +217,24 @@ export class DocumentService {
         driveFileId,
         uploadedById: input.uploadedById,
       });
+      await repository.recordAuditEvents([record]);
+      return record;
     } catch (error) {
+      const cleanupErrors: unknown[] = [];
+      if (record) {
+        try {
+          await repository.delete(record.id);
+        } catch (cleanupError) {
+          cleanupErrors.push(cleanupError);
+        }
+      }
       try {
         await drive.remove(driveFileId);
       } catch (cleanupError) {
-        throw reportCleanupFailure('generated file rollback', error, [cleanupError], [driveFileId]);
+        cleanupErrors.push(cleanupError);
+      }
+      if (cleanupErrors.length > 0) {
+        throw reportCleanupFailure('generated file rollback', error, cleanupErrors, [driveFileId]);
       }
       throw error;
     }

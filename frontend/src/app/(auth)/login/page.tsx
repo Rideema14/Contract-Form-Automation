@@ -2,16 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, LoaderCircle, LockKeyhole } from "lucide-react";
+import { AlertCircle, FileText, LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ApiError } from "@/lib/api-client";
@@ -24,17 +17,14 @@ type FormErrors = {
 
 function validateForm(email: string, password: string): FormErrors {
   const errors: FormErrors = {};
-
   if (!email.trim()) {
     errors.email = "Email is required.";
   } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     errors.email = "Enter a valid email address.";
   }
-
   if (!password) {
     errors.password = "Password is required.";
   }
-
   return errors;
 }
 
@@ -66,18 +56,15 @@ export default function LoginPage() {
         })
         .finally(() => setIsCheckingSession(false));
     }, 0);
-
     return () => window.clearTimeout(timeoutId);
   }, [router]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setServerError("");
-
     const validationErrors = validateForm(email, password);
     setErrors(validationErrors);
     if (Object.keys(validationErrors).length > 0) return;
-
     setIsSubmitting(true);
     try {
       await login(email.trim(), password);
@@ -91,98 +78,162 @@ export default function LoginPage() {
 
   if (isCheckingSession) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
+      <main className="flex min-h-screen items-center justify-center bg-background p-4">
         <LoaderCircle className="size-6 animate-spin text-muted-foreground" aria-label="Checking session" />
       </main>
     );
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="mx-auto flex size-10 items-center justify-center rounded-full bg-primary text-primary-foreground">
-            <LockKeyhole className="size-5" />
+    <main className="flex min-h-screen bg-background text-foreground">
+      {/* Left branding panel — black & white enterprise panel, hidden on small screens */}
+      <div className="hidden lg:flex lg:w-1/2 flex-col justify-between bg-primary p-12 text-primary-foreground">
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-lg border border-primary-foreground/20 bg-primary-foreground/10">
+            <FileText className="size-5 text-primary-foreground" />
           </div>
-          <CardTitle className="text-2xl">Sign in</CardTitle>
-          <CardDescription>
-            Sign in to manage your contract forms.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form className="space-y-5" onSubmit={handleSubmit} noValidate>
-            {serverError && (
+          <span className="text-lg font-semibold tracking-tight">Contract Forms</span>
+        </div>
+
+        <div className="space-y-6">
+          <div className="space-y-3">
+            <div className="inline-block rounded-full border border-primary-foreground/20 bg-primary-foreground/10 px-3 py-1 text-xs font-medium uppercase tracking-widest text-primary-foreground/80">
+              Procurement &amp; Governance
+            </div>
+            <h1 className="text-4xl font-bold leading-tight tracking-tight">
+              Contract Forms
+              <br />
+              Automation
+            </h1>
+            <p className="max-w-sm text-base leading-relaxed text-primary-foreground/70">
+              Create, review, and approve contract forms with structured multi-level sign-off — from first draft to final PDF.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4 pt-4">
+            {[
+              { label: "Submitters", desc: "Create & track" },
+              { label: "Approvers", desc: "Review & decide" },
+              { label: "Admins", desc: "Manage & audit" },
+            ].map((item) => (
               <div
-                className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
-                role="alert"
+                key={item.label}
+                className="rounded-lg border border-primary-foreground/15 bg-primary-foreground/5 p-4"
               >
-                <AlertCircle className="mt-0.5 size-4 shrink-0" />
-                <span>{serverError}</span>
+                <p className="text-sm font-semibold">{item.label}</p>
+                <p className="mt-0.5 text-xs text-primary-foreground/65">{item.desc}</p>
               </div>
-            )}
+            ))}
+          </div>
+        </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                name="email"
-                type="email"
-                autoComplete="email"
-                placeholder="you@example.com"
-                value={email}
-                aria-invalid={Boolean(errors.email)}
-                aria-describedby={errors.email ? "email-error" : undefined}
-                onChange={(event) => {
-                  setEmail(event.target.value);
-                  if (errors.email) {
-                    setErrors((current) => ({ ...current, email: undefined }));
-                  }
-                }}
-                disabled={isSubmitting}
-              />
-              {errors.email && (
-                <p id="email-error" className="text-sm text-destructive">
-                  {errors.email}
-                </p>
-              )}
+        <p className="text-xs text-primary-foreground/50">
+          &copy; {new Date().getFullYear()} Contract Forms Automation.
+        </p>
+      </div>
+
+      {/* Right login panel */}
+      <div className="flex w-full lg:w-1/2 items-center justify-center bg-muted/30 p-6 lg:p-12">
+        <div className="w-full max-w-sm">
+          {/* Mobile logo */}
+          <div className="mb-8 flex items-center justify-center gap-2.5 lg:hidden">
+            <div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+              <FileText className="size-4" />
+            </div>
+            <span className="text-base font-semibold tracking-tight text-foreground">
+              Contract Forms
+            </span>
+          </div>
+
+          <div className="rounded-xl border border-border bg-card p-8 text-card-foreground shadow-sm">
+            <div className="mb-7">
+              <h2 className="text-2xl font-bold tracking-tight">Welcome back</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Sign in to your account to continue
+              </p>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                placeholder="Enter your password"
-                value={password}
-                aria-invalid={Boolean(errors.password)}
-                aria-describedby={errors.password ? "password-error" : undefined}
-                onChange={(event) => {
-                  setPassword(event.target.value);
-                  if (errors.password) {
-                    setErrors((current) => ({
-                      ...current,
-                      password: undefined,
-                    }));
-                  }
-                }}
-                disabled={isSubmitting}
-              />
-              {errors.password && (
-                <p id="password-error" className="text-sm text-destructive">
-                  {errors.password}
-                </p>
+            <form className="space-y-5" onSubmit={handleSubmit} noValidate>
+              {serverError && (
+                <div
+                  className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
+                  role="alert"
+                >
+                  <AlertCircle className="mt-0.5 size-4 shrink-0" />
+                  <span>{serverError}</span>
+                </div>
               )}
-            </div>
 
-            <Button className="w-full" type="submit" disabled={isSubmitting}>
-              {isSubmitting && <LoaderCircle className="animate-spin" />}
-              {isSubmitting ? "Signing in..." : "Sign in"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+              <div className="space-y-1.5">
+                <Label htmlFor="email" className="text-sm font-medium">
+                  Email address
+                </Label>
+                <Input
+                  id="email"
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  placeholder="you@company.com"
+                  value={email}
+                  aria-invalid={Boolean(errors.email)}
+                  aria-describedby={errors.email ? "email-error" : undefined}
+                  className="h-10"
+                  onChange={(event) => {
+                    setEmail(event.target.value);
+                    if (errors.email) setErrors((c) => ({ ...c, email: undefined }));
+                  }}
+                  disabled={isSubmitting}
+                />
+                {errors.email && (
+                  <p id="email-error" className="text-xs text-destructive">
+                    {errors.email}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="password" className="text-sm font-medium">
+                  Password
+                </Label>
+                <Input
+                  id="password"
+                  name="password"
+                  type="password"
+                  autoComplete="current-password"
+                  placeholder="Enter your password"
+                  value={password}
+                  aria-invalid={Boolean(errors.password)}
+                  aria-describedby={errors.password ? "password-error" : undefined}
+                  className="h-10"
+                  onChange={(event) => {
+                    setPassword(event.target.value);
+                    if (errors.password) setErrors((c) => ({ ...c, password: undefined }));
+                  }}
+                  disabled={isSubmitting}
+                />
+                {errors.password && (
+                  <p id="password-error" className="text-xs text-destructive">
+                    {errors.password}
+                  </p>
+                )}
+              </div>
+
+              <Button
+                type="submit"
+                disabled={isSubmitting}
+                className="h-10 w-full font-semibold"
+              >
+                {isSubmitting && <LoaderCircle className="size-4 animate-spin" />}
+                {isSubmitting ? "Signing in..." : "Sign in"}
+              </Button>
+            </form>
+
+            <p className="mt-6 text-center text-xs text-muted-foreground">
+              Contact your administrator if you need access.
+            </p>
+          </div>
+        </div>
+      </div>
     </main>
   );
 }

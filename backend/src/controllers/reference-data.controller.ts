@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { sendSuccess } from '../utils/response';
 import { AppError } from '../utils/app-error';
+import { recordAuditEvent } from '../services/audit.service';
 
 type Category = 'departments' | 'categories' | 'vendor-types' | 'currencies' | 'vendors';
 
@@ -15,6 +16,13 @@ function categoryParam(req: Request): Category {
 
 function idParam(req: Request): string {
   return Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+}
+
+function getActorId(req: Request): string {
+  if (!req.authUser) {
+    throw new AppError(401, 'AUTHENTICATION_REQUIRED', 'Authentication required');
+  }
+  return req.authUser.id;
 }
 
 function requiredText(value: unknown, field: string): string {
@@ -98,20 +106,42 @@ export async function listReferenceData(req: Request, res: Response, next: NextF
 export async function createReferenceRecord(req: Request, res: Response, next: NextFunction) {
   try {
     const category = categoryParam(req);
+    const actorId = getActorId(req);
     let record: unknown;
 
     if (category === 'departments') {
       const name = requiredText(req.body?.name, 'Name');
       await rejectNameDuplicate('department', name);
-      record = await prisma.department.create({ data: { name }, select: { id: true, name: true } });
+      record = await prisma.$transaction(async (tx) => {
+        const created = await tx.department.create({ data: { name }, select: { id: true, name: true } });
+        await recordAuditEvent(tx, {
+          actorId, action: 'REFERENCE_DATA_CREATED', entityType: 'ReferenceData', entityId: created.id,
+          details: { category, name: created.name },
+        });
+        return created;
+      });
     } else if (category === 'categories') {
       const name = requiredText(req.body?.name, 'Name');
       await rejectNameDuplicate('contractCategory', name);
-      record = await prisma.contractCategory.create({ data: { name }, select: { id: true, name: true } });
+      record = await prisma.$transaction(async (tx) => {
+        const created = await tx.contractCategory.create({ data: { name }, select: { id: true, name: true } });
+        await recordAuditEvent(tx, {
+          actorId, action: 'REFERENCE_DATA_CREATED', entityType: 'ReferenceData', entityId: created.id,
+          details: { category, name: created.name },
+        });
+        return created;
+      });
     } else if (category === 'vendor-types') {
       const name = requiredText(req.body?.name, 'Name');
       await rejectNameDuplicate('vendorType', name);
-      record = await prisma.vendorType.create({ data: { name }, select: { id: true, name: true } });
+      record = await prisma.$transaction(async (tx) => {
+        const created = await tx.vendorType.create({ data: { name }, select: { id: true, name: true } });
+        await recordAuditEvent(tx, {
+          actorId, action: 'REFERENCE_DATA_CREATED', entityType: 'ReferenceData', entityId: created.id,
+          details: { category, name: created.name },
+        });
+        return created;
+      });
     } else if (category === 'currencies') {
       const code = requiredText(req.body?.code, 'Currency code').toUpperCase();
       const name = requiredText(req.body?.name, 'Currency name');
@@ -122,7 +152,14 @@ export async function createReferenceRecord(req: Request, res: Response, next: N
       if (currencies.some((item) => item.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
         throw new AppError(409, 'DUPLICATE_REFERENCE_DATA', `Currency name "${name}" already exists`);
       }
-      record = await prisma.currency.create({ data: { code, name }, select: { id: true, code: true, name: true } });
+      record = await prisma.$transaction(async (tx) => {
+        const created = await tx.currency.create({ data: { code, name }, select: { id: true, code: true, name: true } });
+        await recordAuditEvent(tx, {
+          actorId, action: 'REFERENCE_DATA_CREATED', entityType: 'ReferenceData', entityId: created.id,
+          details: { category, code: created.code, name: created.name },
+        });
+        return created;
+      });
     } else {
       const name = requiredText(req.body?.name, 'Vendor name');
       await rejectNameDuplicate('vendor', name);
@@ -134,9 +171,16 @@ export async function createReferenceRecord(req: Request, res: Response, next: N
       const contactDetails = req.body?.contactDetails && typeof req.body.contactDetails === 'object'
         ? req.body.contactDetails
         : null;
-      record = await prisma.vendor.create({
-        data: { name, vendorTypeId, contactDetails },
-        select: { id: true, name: true, vendorType: { select: { id: true, name: true } }, contactDetails: true },
+      record = await prisma.$transaction(async (tx) => {
+        const created = await tx.vendor.create({
+          data: { name, vendorTypeId, contactDetails },
+          select: { id: true, name: true, vendorType: { select: { id: true, name: true } }, contactDetails: true },
+        });
+        await recordAuditEvent(tx, {
+          actorId, action: 'REFERENCE_DATA_CREATED', entityType: 'ReferenceData', entityId: created.id,
+          details: { category, name: created.name, vendorTypeId },
+        });
+        return created;
       });
     }
 
@@ -150,20 +194,42 @@ export async function updateReferenceRecord(req: Request, res: Response, next: N
   try {
     const category = categoryParam(req);
     const id = idParam(req);
+    const actorId = getActorId(req);
     let record: unknown;
 
     if (category === 'departments') {
       const name = requiredText(req.body?.name, 'Name');
       await rejectNameDuplicate('department', name, id);
-      record = await prisma.department.update({ where: { id }, data: { name }, select: { id: true, name: true } });
+      record = await prisma.$transaction(async (tx) => {
+        const updated = await tx.department.update({ where: { id }, data: { name }, select: { id: true, name: true } });
+        await recordAuditEvent(tx, {
+          actorId, action: 'REFERENCE_DATA_UPDATED', entityType: 'ReferenceData', entityId: id,
+          details: { category, changedFields: Object.keys(req.body ?? {}).sort() },
+        });
+        return updated;
+      });
     } else if (category === 'categories') {
       const name = requiredText(req.body?.name, 'Name');
       await rejectNameDuplicate('contractCategory', name, id);
-      record = await prisma.contractCategory.update({ where: { id }, data: { name }, select: { id: true, name: true } });
+      record = await prisma.$transaction(async (tx) => {
+        const updated = await tx.contractCategory.update({ where: { id }, data: { name }, select: { id: true, name: true } });
+        await recordAuditEvent(tx, {
+          actorId, action: 'REFERENCE_DATA_UPDATED', entityType: 'ReferenceData', entityId: id,
+          details: { category, changedFields: Object.keys(req.body ?? {}).sort() },
+        });
+        return updated;
+      });
     } else if (category === 'vendor-types') {
       const name = requiredText(req.body?.name, 'Name');
       await rejectNameDuplicate('vendorType', name, id);
-      record = await prisma.vendorType.update({ where: { id }, data: { name }, select: { id: true, name: true } });
+      record = await prisma.$transaction(async (tx) => {
+        const updated = await tx.vendorType.update({ where: { id }, data: { name }, select: { id: true, name: true } });
+        await recordAuditEvent(tx, {
+          actorId, action: 'REFERENCE_DATA_UPDATED', entityType: 'ReferenceData', entityId: id,
+          details: { category, changedFields: Object.keys(req.body ?? {}).sort() },
+        });
+        return updated;
+      });
     } else if (category === 'currencies') {
       const code = requiredText(req.body?.code, 'Currency code').toUpperCase();
       const name = requiredText(req.body?.name, 'Currency name');
@@ -174,7 +240,14 @@ export async function updateReferenceRecord(req: Request, res: Response, next: N
       if (currencies.some((item) => item.id !== id && item.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
         throw new AppError(409, 'DUPLICATE_REFERENCE_DATA', `Currency name "${name}" already exists`);
       }
-      record = await prisma.currency.update({ where: { id }, data: { code, name }, select: { id: true, code: true, name: true } });
+      record = await prisma.$transaction(async (tx) => {
+        const updated = await tx.currency.update({ where: { id }, data: { code, name }, select: { id: true, code: true, name: true } });
+        await recordAuditEvent(tx, {
+          actorId, action: 'REFERENCE_DATA_UPDATED', entityType: 'ReferenceData', entityId: id,
+          details: { category, changedFields: Object.keys(req.body ?? {}).sort() },
+        });
+        return updated;
+      });
     } else {
       const name = requiredText(req.body?.name, 'Vendor name');
       await rejectNameDuplicate('vendor', name, id);
@@ -186,10 +259,17 @@ export async function updateReferenceRecord(req: Request, res: Response, next: N
       const contactDetails = req.body?.contactDetails && typeof req.body.contactDetails === 'object'
         ? req.body.contactDetails
         : null;
-      record = await prisma.vendor.update({
-        where: { id },
-        data: { name, vendorTypeId, contactDetails },
-        select: { id: true, name: true, vendorType: { select: { id: true, name: true } }, contactDetails: true },
+      record = await prisma.$transaction(async (tx) => {
+        const updated = await tx.vendor.update({
+          where: { id },
+          data: { name, vendorTypeId, contactDetails },
+          select: { id: true, name: true, vendorType: { select: { id: true, name: true } }, contactDetails: true },
+        });
+        await recordAuditEvent(tx, {
+          actorId, action: 'REFERENCE_DATA_UPDATED', entityType: 'ReferenceData', entityId: id,
+          details: { category, changedFields: Object.keys(req.body ?? {}).sort() },
+        });
+        return updated;
       });
     }
 
@@ -203,6 +283,7 @@ export async function deleteReferenceRecord(req: Request, res: Response, next: N
   try {
     const category = categoryParam(req);
     const id = idParam(req);
+    const actorId = getActorId(req);
     let usageCount = 0;
     let reason = '';
 
@@ -213,15 +294,39 @@ export async function deleteReferenceRecord(req: Request, res: Response, next: N
       ]);
       usageCount = users + contracts;
       reason = 'users or contract forms';
-      if (usageCount === 0) await prisma.department.delete({ where: { id } });
+      if (usageCount === 0) {
+        await prisma.$transaction(async (tx) => {
+          await tx.department.delete({ where: { id } });
+          await recordAuditEvent(tx, {
+            actorId, action: 'REFERENCE_DATA_DELETED', entityType: 'ReferenceData', entityId: id,
+            details: { category },
+          });
+        });
+      }
     } else if (category === 'categories') {
       usageCount = await prisma.contractForm.count({ where: { contractCategoryId: id } });
       reason = 'contract forms';
-      if (usageCount === 0) await prisma.contractCategory.delete({ where: { id } });
+      if (usageCount === 0) {
+        await prisma.$transaction(async (tx) => {
+          await tx.contractCategory.delete({ where: { id } });
+          await recordAuditEvent(tx, {
+            actorId, action: 'REFERENCE_DATA_DELETED', entityType: 'ReferenceData', entityId: id,
+            details: { category },
+          });
+        });
+      }
     } else if (category === 'vendor-types') {
       usageCount = await prisma.vendor.count({ where: { vendorTypeId: id } });
       reason = 'vendors';
-      if (usageCount === 0) await prisma.vendorType.delete({ where: { id } });
+      if (usageCount === 0) {
+        await prisma.$transaction(async (tx) => {
+          await tx.vendorType.delete({ where: { id } });
+          await recordAuditEvent(tx, {
+            actorId, action: 'REFERENCE_DATA_DELETED', entityType: 'ReferenceData', entityId: id,
+            details: { category },
+          });
+        });
+      }
     } else if (category === 'currencies') {
       const [contracts, quotations] = await Promise.all([
         prisma.contractForm.count({ where: { currencyId: id } }),
@@ -229,7 +334,15 @@ export async function deleteReferenceRecord(req: Request, res: Response, next: N
       ]);
       usageCount = contracts + quotations;
       reason = 'contract forms or quotations';
-      if (usageCount === 0) await prisma.currency.delete({ where: { id } });
+      if (usageCount === 0) {
+        await prisma.$transaction(async (tx) => {
+          await tx.currency.delete({ where: { id } });
+          await recordAuditEvent(tx, {
+            actorId, action: 'REFERENCE_DATA_DELETED', entityType: 'ReferenceData', entityId: id,
+            details: { category },
+          });
+        });
+      }
     } else {
       const [contracts, bidders] = await Promise.all([
         prisma.contractForm.count({ where: { recommendedVendorId: id } }),
@@ -237,7 +350,15 @@ export async function deleteReferenceRecord(req: Request, res: Response, next: N
       ]);
       usageCount = contracts + bidders;
       reason = 'contract forms or bidders';
-      if (usageCount === 0) await prisma.vendor.delete({ where: { id } });
+      if (usageCount === 0) {
+        await prisma.$transaction(async (tx) => {
+          await tx.vendor.delete({ where: { id } });
+          await recordAuditEvent(tx, {
+            actorId, action: 'REFERENCE_DATA_DELETED', entityType: 'ReferenceData', entityId: id,
+            details: { category },
+          });
+        });
+      }
     }
 
     if (usageCount > 0) {

@@ -13,6 +13,7 @@ import { createDocumentUploadMiddleware, documentUploadErrorHandler } from './up
 // Test-only values, NOT project decisions (CL-14).
 const config = parseDocumentUploadConfig({ allowedExtensions: ['pdf', 'xlsx'], maxFileSizeBytes: 1000, maxFileCount: 2 });
 const PDF = 'application/pdf';
+const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const FORM = '11111111-1111-4111-8111-111111111111';
 const OTHER_FORM = '22222222-2222-4222-8222-222222222222';
 
@@ -51,10 +52,18 @@ const appErrors: ErrorRequestHandler = (err, _req, res, next) => {
 
 let drive: FakeDrive;
 let packageCalls: string[];
+let currentPdfCalls: string[];
+let finalPdfCalls: string[];
 
 function app() {
+  return appWithDocuments().app;
+}
+
+function appWithDocuments() {
   drive = new FakeDrive();
   packageCalls = [];
+  currentPdfCalls = [];
+  finalPdfCalls = [];
   const service = new DocumentService({ drive, repository: new InMemoryAttachmentRepository() });
   const a = express();
   a.use(
@@ -62,38 +71,49 @@ function app() {
     createAttachmentsRouter({
       service,
       authenticate,
-      // creator = "owner" and form must be FORM; others are denied
       assertCanUpload: async (formId, user) => {
         if (formId !== FORM) throw new AppError(404, 'FORM_NOT_FOUND', 'Contract form not found');
         if (user.id !== 'owner') throw new AppError(403, 'FORBIDDEN', 'not allowed');
       },
       assertCanView: async (formId, user) => {
-        if (formId !== FORM) throw new AppError(403, 'FORBIDDEN', 'not allowed');
-        if (user.id === 'outsider') throw new AppError(403, 'FORBIDDEN', 'not allowed');
+        if (formId !== FORM || user.id === 'outsider') throw new AppError(403, 'FORBIDDEN', 'not allowed');
       },
       getContractFolderName: async () => 'CF-2026-0001 - Office Renovation - 11111111',
       upload: createDocumentUploadMiddleware(config, 'files'),
+      generateCurrentPdf: async (formId) => {
+        currentPdfCalls.push(formId);
+        return { fileName: 'CF-1_-_Current.pdf', content: Buffer.from('%PDF-current') };
+      },
+      generateFinalPdfAttachment: async (formId, user) => {
+        finalPdfCalls.push(`${formId}:${user.id}:${user.role}`);
+        return service.storeGeneratedFile({
+          contractFormId: formId,
+          contractFolderName: 'CF-2026-0001 - Office Renovation - 11111111',
+          category: 'GENERATED_PDF',
+          uploadedById: user.id,
+          fileName: 'CF-1_-_Final.pdf',
+          mimeType: PDF,
+          content: Buffer.from('%PDF-final'),
+        });
+      },
       generatePackage: async (formId) => {
         packageCalls.push(formId);
-        return {
-          fileName: 'Contract_CF-1_Full_Package.zip',
-          content: Buffer.from('zip-content'),
-        };
+        return { fileName: 'Contract_CF-1_Full_Package.zip', content: Buffer.from('zip-content') };
       },
     })
   );
   a.use(documentUploadErrorHandler);
   a.use(appErrors);
-  return a;
+  return { app: a, service };
 }
 
 const owner = { 'x-user': 'owner:SUBMITTER' };
-const upload = (a: express.Express, o: { name?: string; size?: number; category?: string; headers?: Record<string, string>; form?: string } = {}) =>
+const upload = (a: express.Express, o: { name?: string; size?: number; category?: string; contentType?: string; headers?: Record<string, string>; form?: string } = {}) =>
   request(a)
     .post(`/api/forms/${o.form ?? FORM}/attachments`)
     .set(o.headers ?? owner)
     .field('category', o.category ?? 'SUPPORTING')
-    .attach('files', Buffer.alloc(o.size ?? 50, 'a'), { filename: o.name ?? 'quote.pdf', contentType: PDF });
+    .attach('files', Buffer.alloc(o.size ?? 50, 'a'), { filename: o.name ?? 'quote.pdf', contentType: o.contentType ?? PDF });
 
 beforeEach(() => undefined);
 
@@ -196,6 +216,81 @@ describe('attachments router', () => {
     expect((await request(a).get(`/api/forms/${FORM}/attachments/${id}/download`).set(headers)).status).toBe(403);
   });
 
+  it('allows the owning submitter to download an available generated PDF', async () => {
+    const { app: a, service } = appWithDocuments();
+    const pdf = await service.storeGeneratedFile({
+      contractFormId: FORM,
+      contractFolderName: 'CF-2026-0001 - Office Renovation - 11111111',
+      category: 'GENERATED_PDF',
+      uploadedById: 'approver',
+      fileName: 'Contract_Final.pdf',
+      mimeType: PDF,
+      content: Buffer.from('%PDF-approved-contract'),
+    });
+
+    const response = await request(a)
+      .get(`/api/forms/${FORM}/attachments/${pdf.id}/download`)
+      .set(owner)
+      .buffer(true);
+    const denied = await request(a)
+      .get(`/api/forms/${FORM}/attachments/${pdf.id}/download`)
+      .set({ 'x-user': 'outsider:SUBMITTER' });
+
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toBe(PDF);
+    expect(response.headers['content-disposition']).toContain('attachment;');
+    expect(response.body.toString()).toBe('%PDF-approved-contract');
+    expect(denied.status).toBe(403);
+  });
+
+  it('allows the contract creator to download a current PDF snapshot', async () => {
+    const a = app();
+    const response = await request(a)
+      .get(`/api/forms/${FORM}/pdf`)
+      .set(owner)
+      .buffer(true);
+
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toBe(PDF);
+    expect(response.headers['content-disposition']).toContain('CF-1_-_Current.pdf');
+    expect(response.body.toString()).toBe('%PDF-current');
+    expect(currentPdfCalls).toEqual([FORM]);
+    expect(drive.files.size).toBe(0);
+  });
+
+  it('allows the owning submitter to generate and download the approved final PDF', async () => {
+    const a = app();
+    const generated = await request(a)
+      .post(`/api/forms/${FORM}/final-pdf/generate`)
+      .set(owner);
+
+    expect(generated.status).toBe(200);
+    expect(generated.body.data).toMatchObject({
+      contractFormId: FORM,
+      category: 'GENERATED_PDF',
+      fileName: 'CF-1_-_Final.pdf',
+    });
+    expect(generated.body.data.driveFileId).toBeUndefined();
+    expect(finalPdfCalls).toEqual([`${FORM}:owner:SUBMITTER`]);
+
+    const downloaded = await request(a)
+      .get(`/api/forms/${FORM}/attachments/${generated.body.data.id}/download`)
+      .set(owner)
+      .buffer(true);
+    expect(downloaded.status).toBe(200);
+    expect(downloaded.headers['content-type']).toBe(PDF);
+    expect(downloaded.body.toString()).toBe('%PDF-final');
+  });
+
+  it('denies a submitter who cannot view the contract from generating its final PDF', async () => {
+    const response = await request(app())
+      .post(`/api/forms/${FORM}/final-pdf/generate`)
+      .set({ 'x-user': 'outsider:SUBMITTER' });
+
+    expect(response.status).toBe(403);
+    expect(finalPdfCalls).toEqual([]);
+  });
+
   it('does not allow an attachment id to be used under another form', async () => {
     const a = app();
     const up = await upload(a);
@@ -220,6 +315,25 @@ describe('attachments router', () => {
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('INVALID_CATEGORY_FILE');
     expect(drive.files.size).toBe(0);
+  });
+
+  it('accepts PDFs as supporting documents and Excel files as cost estimates only', async () => {
+    const a = app();
+    expect((await upload(a, { category: 'SUPPORTING', name: 'quote.pdf' })).status).toBe(201);
+
+    const pdfEstimate = await upload(a, { category: 'COST_ESTIMATE_EXCEL', name: 'estimate.pdf' });
+    expect(pdfEstimate.status).toBe(400);
+    expect(pdfEstimate.body.error.code).toBe('INVALID_CATEGORY_FILE');
+    expect(drive.files.size).toBe(1);
+
+    const excelEstimate = await upload(a, {
+      category: 'COST_ESTIMATE_EXCEL',
+      name: 'estimate.xlsx',
+      contentType: XLSX,
+    });
+    expect(excelEstimate.status).toBe(201);
+    expect(excelEstimate.body.data[0].category).toBe('COST_ESTIMATE_EXCEL');
+    expect(drive.files.size).toBe(2);
   });
 
   it('returns upload validation errors without storing anything', async () => {

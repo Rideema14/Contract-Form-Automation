@@ -167,6 +167,7 @@ export type Attachment = {
 export type ApprovalStep = {
   id: string;
   approverId?: string;
+  approver?: { id: string; fullName: string };
   level: number;
   status: string;
   actedAt: string | null;

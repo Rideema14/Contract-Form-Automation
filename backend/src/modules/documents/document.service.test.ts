@@ -56,6 +56,10 @@ describe('DocumentService', () => {
     const a = await tempFile('my quote.pdf');
     const records = await svc.uploadAttachments({ ...base, files: [a, a] });
     expect(records.map((r) => r.fileName)).toEqual(['my_quote.pdf', 'my_quote_1.pdf']);
+    expect(repo.listAuditEvents()).toEqual(records.map((record) => ({
+      action: 'ATTACHMENT_UPLOADED',
+      attachmentId: record.id,
+    })));
     expect(drive.folderNames).toEqual(['Office Renovation - c1', 'Office Renovation - c1']);
   });
 
@@ -80,10 +84,25 @@ describe('DocumentService', () => {
       },
       findById: async () => null,
       delete: async () => undefined,
+      recordAuditEvents: async () => undefined,
     };
     const svc = new DocumentService({ drive, repository: repo });
     await expect(svc.uploadAttachments({ ...base, files: [await tempFile('a.pdf')] })).rejects.toThrow('db down');
     expect(drive.files.size).toBe(0);
+  });
+
+  it('rolls back uploaded files when audit-event persistence fails', async () => {
+    const drive = new FakeDrive();
+    const repo = new InMemoryAttachmentRepository();
+    vi.spyOn(repo, 'recordAuditEvents').mockRejectedValue(new Error('audit database down'));
+    const svc = new DocumentService({ drive, repository: repo });
+
+    await expect(
+      svc.uploadAttachments({ ...base, files: [await tempFile('a.pdf')] }),
+    ).rejects.toThrow('audit database down');
+    expect(drive.files.size).toBe(0);
+    expect(await repo.listByContract('c1')).toEqual([]);
+    expect(repo.listAuditEvents()).toEqual([]);
   });
 
   it('reports incomplete cleanup instead of hiding orphaned private files', async () => {
@@ -99,6 +118,7 @@ describe('DocumentService', () => {
       },
       findById: async () => null,
       delete: async () => undefined,
+      recordAuditEvents: async () => undefined,
     };
     const svc = new DocumentService({ drive, repository: repo });
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -183,5 +203,6 @@ describe('DocumentService', () => {
     });
     expect(rec.fileName).toBe('Final_Contract.pdf');
     expect(rec.sizeBytes).toBe(6);
+    expect(repo.listAuditEvents()).toEqual([{ action: 'PDF_GENERATED', attachmentId: rec.id }]);
   });
 });

@@ -71,6 +71,75 @@ describe('contract request validation', () => {
   });
 });
 
+describe('Admin contract editing', () => {
+  it('allows an Admin to edit another user’s draft', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: 'another-user',
+      formSchemaVersionId: 'schema-1',
+      dynamicValues: {},
+      referenceNo: 'CF-2026-0001',
+      status: ContractStatus.DRAFT,
+    } as never);
+    const update = vi.spyOn(prisma.contractForm, 'update').mockResolvedValue({
+      id: 'form-1',
+      title: 'Updated by Admin',
+    } as never);
+    const auditCreate = vi.fn().mockResolvedValue({ id: 'audit-1' });
+    vi.spyOn(prisma, '$transaction').mockImplementation(
+      async (callback) => callback({
+        contractForm: { update },
+        auditLog: { create: auditCreate },
+      } as never) as never,
+    );
+
+    await updateContract('form-1', admin, { title: 'Updated by Admin' });
+
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 'form-1' },
+      data: { title: 'Updated by Admin', referenceNo: 'CF-2026-0001' },
+    });
+    expect(auditCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        actorId: admin.id,
+        action: 'CONTRACT_UPDATED',
+        entityId: 'form-1',
+        contractFormId: 'form-1',
+        details: { changedFields: ['title'] },
+      }),
+    });
+  });
+
+  it('does not allow Admin edits to forms outside editable workflow states', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: 'another-user',
+      formSchemaVersionId: 'schema-1',
+      dynamicValues: {},
+      referenceNo: 'CF-2026-0001',
+      status: ContractStatus.PENDING_APPROVAL,
+    } as never);
+    const update = vi.spyOn(prisma.contractForm, 'update');
+
+    await expect(updateContract('form-1', admin, { title: 'Updated by Admin' }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'INVALID_STATE' });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('keeps edits to other users’ drafts restricted to Admins', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: 'another-user',
+      status: ContractStatus.DRAFT,
+    } as never);
+    const update = vi.spyOn(prisma.contractForm, 'update');
+
+    await expect(updateContract('form-1', submitter, { title: 'Unauthorized edit' }))
+      .rejects.toMatchObject({ statusCode: 403, code: 'FORBIDDEN' });
+    expect(update).not.toHaveBeenCalled();
+  });
+});
+
 describe('contract deletion authorization', () => {
   function mockDeletionTransaction(form: {
     id: string;
@@ -417,7 +486,10 @@ describe('contract service authorization and persistence', () => {
       id: 'form-1',
       status: ContractStatus.DRAFT,
       createdById: submitter.id,
+      referenceNo: `CF-${new Date().getUTCFullYear()}-0004`,
+      title: 'Draft',
     });
+    const auditCreate = vi.fn().mockResolvedValue({ id: 'audit-1' });
     const year = new Date().getUTCFullYear();
     const tx = {
       $queryRaw: vi.fn().mockResolvedValue([]),
@@ -425,6 +497,7 @@ describe('contract service authorization and persistence', () => {
         findMany: vi.fn().mockResolvedValue([{ referenceNo: `CF-${year}-0003` }]),
         create,
       },
+      auditLog: { create: auditCreate },
     };
     vi.spyOn(prisma, '$transaction').mockImplementation(
       async (callback) => callback(tx as never) as never,
@@ -446,6 +519,15 @@ describe('contract service authorization and persistence', () => {
         }),
       }),
     );
+    expect(auditCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        actorId: submitter.id,
+        action: 'CONTRACT_CREATED',
+        entityType: 'ContractForm',
+        entityId: 'form-1',
+        contractFormId: 'form-1',
+      }),
+    });
   });
 
   it('rejects a stale published version when creating a contract', async () => {
@@ -628,6 +710,39 @@ describe('contract service authorization and persistence', () => {
     findUnique.mockRestore();
   });
 
+  it('includes assigned approver identities in contract details', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: submitter.id,
+      status: ContractStatus.PENDING_APPROVAL,
+    } as never);
+    const detail = vi.spyOn(prisma.contractForm, 'findUniqueOrThrow').mockResolvedValue({
+      id: 'form-1',
+      approvalSteps: [{
+        id: 'step-1',
+        level: 1,
+        approverId: approver.id,
+        approver: { id: approver.id, fullName: 'Assigned Approver' },
+      }],
+    } as never);
+
+    await getContract('form-1', submitter);
+
+    expect(detail).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({
+        approvalSteps: {
+          orderBy: { level: 'asc' },
+          include: {
+            approver: { select: { id: true, fullName: true } },
+            decisions: true,
+          },
+        },
+      }),
+    }));
+
+    detail.mockRestore();
+  });
+
   it('assigns a reference number when loading a legacy draft without one', async () => {
     const year = new Date().getUTCFullYear();
     vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
@@ -727,6 +842,12 @@ describe('contract service authorization and persistence', () => {
     const update = vi.spyOn(prisma.contractForm, 'update').mockResolvedValue({
       id: 'form-1',
     } as never);
+    vi.spyOn(prisma, '$transaction').mockImplementation(
+      async (callback) => callback({
+        contractForm: { update },
+        auditLog: { create: vi.fn().mockResolvedValue({ id: 'audit-1' }) },
+      } as never) as never,
+    );
 
     await expect(
       updateContract('form-1', submitter, {
@@ -831,12 +952,14 @@ describe('contract service authorization and persistence', () => {
 
     const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
     const deleteBidderRecord = vi.fn().mockResolvedValue({ id: 'bidder-1' });
+    const auditCreate = vi.fn().mockResolvedValue({ id: 'audit-1' });
 
     const transaction = vi.spyOn(prisma, '$transaction').mockImplementation(
       async (callback) =>
         callback({
           quotation: { deleteMany },
           bidder: { delete: deleteBidderRecord },
+          auditLog: { create: auditCreate },
         } as never) as never,
     );
 
@@ -849,6 +972,14 @@ describe('contract service authorization and persistence', () => {
 
     expect(deleteBidderRecord).toHaveBeenCalledWith({
       where: { id: 'bidder-1' },
+    });
+    expect(auditCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        actorId: submitter.id,
+        action: 'BIDDER_DELETED',
+        entityId: 'bidder-1',
+        contractFormId: 'form-1',
+      }),
     });
   });
 
@@ -889,11 +1020,13 @@ describe('contract service authorization and persistence', () => {
     const update = vi.spyOn(prisma.quotation, 'update').mockResolvedValue({
       id: 'quotation-1',
     } as never);
+    const auditCreate = vi.fn().mockResolvedValue({ id: 'audit-1' });
 
     vi.spyOn(prisma, '$transaction').mockImplementation(
       async (callback) =>
         callback({
           quotation: { update },
+          auditLog: { create: auditCreate },
         } as never) as never,
     );
 
@@ -908,6 +1041,13 @@ describe('contract service authorization and persistence', () => {
         }),
       }),
     );
+    expect(auditCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'QUOTATION_UPDATED',
+        entityId: 'quotation-1',
+        contractFormId: 'form-1',
+      }),
+    });
   });
 });
 

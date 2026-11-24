@@ -34,7 +34,14 @@ export async function getFormSchemaDraft(req: Request, res: Response, next: Next
 export async function saveFormSchemaDraft(req: Request, res: Response, next: NextFunction) {
   try {
     const definition = parse(formSchemaDefinitionSchema.safeParse(req.body));
-    sendSuccess(req, res, 200, 'Form configuration draft saved', await formBuilderService.saveFormSchemaDraft(definition));
+    if (!req.authUser) throw new AppError(401, 'AUTHENTICATION_REQUIRED', 'Authentication required');
+    sendSuccess(
+      req,
+      res,
+      200,
+      'Form configuration draft saved',
+      await formBuilderService.saveFormSchemaDraft(definition, req.authUser.id),
+    );
   } catch (error) {
     next(error);
   }
@@ -42,7 +49,8 @@ export async function saveFormSchemaDraft(req: Request, res: Response, next: Nex
 
 export async function publishFormSchema(req: Request, res: Response, next: NextFunction) {
   try {
-    sendSuccess(req, res, 201, 'Form configuration published', await formBuilderService.publishFormSchema());
+    if (!req.authUser) throw new AppError(401, 'AUTHENTICATION_REQUIRED', 'Authentication required');
+    sendSuccess(req, res, 201, 'Form configuration published', await formBuilderService.publishFormSchema(req.authUser.id));
   } catch (error) {
     next(error);
   }

@@ -5,6 +5,7 @@ import { initializeOrResetApprovalWorkflow } from './approval.service';
 import { initializeWorkflowSchema } from '../schemas/approval.schema';
 import { prisma } from '../lib/prisma';
 import { AppError } from '../utils/app-error';
+import { recordAuditEvent } from './audit.service';
 import { ContractDraftInput, CreateContractInput } from '../schemas/contract.schema';
 import { formSchemaDefinitionSchema } from '../schemas/form-builder.schema';
 import {
@@ -147,7 +148,7 @@ async function getEditableForm(formId: string, user: AuthUser) {
     throw new AppError(404, 'FORM_NOT_FOUND', 'Contract form not found');
   }
 
-  if (form.createdById !== user.id) {
+  if (user.role !== UserRole.ADMIN && form.createdById !== user.id) {
     throw new AppError(
       403,
       'FORBIDDEN',
@@ -168,7 +169,7 @@ async function getEditableForm(formId: string, user: AuthUser) {
 
 /**
  * Reuse the contract's existing edit authorization for attachment uploads.
- * Only the contract creator can upload while the form is DRAFT or RETURNED.
+ * The creator or an Admin can upload while the form is DRAFT or RETURNED.
  */
 export async function assertCanUploadAttachments(
   formId: string,
@@ -289,7 +290,7 @@ export async function createDraft(
         referenceNo = await nextReferenceNumber(tx);
       }
 
-      return tx.contractForm.create({
+      const created = await tx.contractForm.create({
         data: {
           ...contractInput,
           referenceNo,
@@ -300,6 +301,18 @@ export async function createDraft(
           status: ContractStatus.DRAFT,
         },
       });
+      await recordAuditEvent(tx, {
+        actorId: user.id,
+        action: 'CONTRACT_CREATED',
+        entityType: 'ContractForm',
+        entityId: created.id,
+        contractFormId: created.id,
+        details: {
+          referenceNo: created.referenceNo ?? null,
+          title: created.title ?? null,
+        },
+      });
+      return created;
     });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -489,7 +502,14 @@ export async function getContract(formId: string, user: AuthUser) {
         },
       },
       approvalSteps: {
+        orderBy: { level: 'asc' },
         include: {
+          approver: {
+            select: {
+              id: true,
+              fullName: true,
+            },
+          },
           decisions: true,
         },
       },
@@ -597,15 +617,26 @@ export async function updateContract(
   }
 
   try {
-    return await prisma.contractForm.update({
-      where: { id: formId },
-      data: {
-        ...normalizedInput,
-        ...(normalizedDynamicValues !== undefined ? { dynamicValues: normalizedDynamicValues } : {}),
-        ...(Object.prototype.hasOwnProperty.call(input, 'contractAmount')
-          ? { contractAmount: decimal(input.contractAmount) }
-          : {}),
-      },
+    return await prisma.$transaction(async (tx) => {
+      const updated = await tx.contractForm.update({
+        where: { id: formId },
+        data: {
+          ...normalizedInput,
+          ...(normalizedDynamicValues !== undefined ? { dynamicValues: normalizedDynamicValues } : {}),
+          ...(Object.prototype.hasOwnProperty.call(input, 'contractAmount')
+            ? { contractAmount: decimal(input.contractAmount) }
+            : {}),
+        },
+      });
+      await recordAuditEvent(tx, {
+        actorId: user.id,
+        action: 'CONTRACT_UPDATED',
+        entityType: 'ContractForm',
+        entityId: formId,
+        contractFormId: formId,
+        details: { changedFields: Object.keys(input).sort() },
+      });
+      return updated;
     });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -1093,7 +1124,7 @@ export async function createBidder(
     });
     const sortOrder = (last._max.sortOrder ?? -1) + 1;
 
-    return tx.bidder.create({
+    const created = await tx.bidder.create({
       data: {
         ...input,
         sortOrder,
@@ -1105,6 +1136,14 @@ export async function createBidder(
         quotations: true,
       },
     });
+    await recordAuditEvent(tx, {
+      actorId: user.id,
+      action: 'BIDDER_CREATED',
+      entityType: 'Bidder',
+      entityId: created.id,
+      contractFormId: formId,
+    });
+    return created;
   });
 }
 
@@ -1190,8 +1229,8 @@ export async function updateBidder(
     }
   }
 
-  return prisma.$transaction(async (tx) =>
-    tx.bidder.update({
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.bidder.update({
       where: { id: bidderId },
       data: {
         ...input,
@@ -1201,8 +1240,17 @@ export async function updateBidder(
         vendor: true,
         quotations: true,
       },
-    })
-  );
+    });
+    await recordAuditEvent(tx, {
+      actorId: user.id,
+      action: 'BIDDER_UPDATED',
+      entityType: 'Bidder',
+      entityId: bidderId,
+      contractFormId: formId,
+      details: { changedFields: Object.keys(input).sort() },
+    });
+    return updated;
+  });
 }
 
 export async function deleteBidder(
@@ -1251,13 +1299,22 @@ export async function deleteBidder(
   }
 
   return prisma.$transaction(async (tx) => {
-    await tx.quotation.deleteMany({
+    const deletedQuotations = await tx.quotation.deleteMany({
       where: { bidderId },
     });
 
-    return tx.bidder.delete({
+    const deleted = await tx.bidder.delete({
       where: { id: bidderId },
     });
+    await recordAuditEvent(tx, {
+      actorId: user.id,
+      action: 'BIDDER_DELETED',
+      entityType: 'Bidder',
+      entityId: bidderId,
+      contractFormId: formId,
+      details: { deletedQuotations: deletedQuotations.count },
+    });
+    return deleted;
   });
 }
 
@@ -1321,16 +1378,25 @@ export async function createQuotation(
   const quotedAmount = new Prisma.Decimal(input.quotedAmount);
   assertNonNegative(quotedAmount, 'quotedAmount');
 
-  return prisma.$transaction(async (tx) =>
-    tx.quotation.create({
+  return prisma.$transaction(async (tx) => {
+    const created = await tx.quotation.create({
       data: {
         ...input,
         quotedAmount,
         bidderId,
       },
       include: { currency: true },
-    })
-  );
+    });
+    await recordAuditEvent(tx, {
+      actorId: user.id,
+      action: 'QUOTATION_CREATED',
+      entityType: 'Quotation',
+      entityId: created.id,
+      contractFormId: formId,
+      details: { bidderId },
+    });
+    return created;
+  });
 }
 
 export async function updateQuotation(
@@ -1380,16 +1446,25 @@ export async function updateQuotation(
     assertNonNegative(quotedAmount, 'quotedAmount');
   }
 
-  return prisma.$transaction(async (tx) =>
-    tx.quotation.update({
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.quotation.update({
       where: { id: quotationId },
       data: {
         ...input,
         ...(quotedAmount ? { quotedAmount } : {}),
       },
       include: { currency: true },
-    })
-  );
+    });
+    await recordAuditEvent(tx, {
+      actorId: user.id,
+      action: 'QUOTATION_UPDATED',
+      entityType: 'Quotation',
+      entityId: quotationId,
+      contractFormId: formId,
+      details: { changedFields: Object.keys(input).sort() },
+    });
+    return updated;
+  });
 }
 
 export async function deleteQuotation(
@@ -1414,11 +1489,20 @@ export async function deleteQuotation(
     throw new AppError(404, 'QUOTATION_NOT_FOUND', 'Quotation not found');
   }
 
-  return prisma.$transaction(async (tx) =>
-    tx.quotation.delete({
+  return prisma.$transaction(async (tx) => {
+    const deleted = await tx.quotation.delete({
       where: { id: quotationId },
-    })
-  );
+    });
+    await recordAuditEvent(tx, {
+      actorId: user.id,
+      action: 'QUOTATION_DELETED',
+      entityType: 'Quotation',
+      entityId: quotationId,
+      contractFormId: formId,
+      details: { bidderId },
+    });
+    return deleted;
+  });
 }
 
 export async function listCostLines(
@@ -1475,8 +1559,8 @@ export async function createCostLine(
     input.unitCost
   );
 
-  return prisma.$transaction(async (tx) =>
-    tx.costLine.create({
+  return prisma.$transaction(async (tx) => {
+    const created = await tx.costLine.create({
       data: {
         ...input,
         contractFormId: formId,
@@ -1484,8 +1568,16 @@ export async function createCostLine(
         unitCost: decimal(input.unitCost),
         amount,
       },
-    })
-  );
+    });
+    await recordAuditEvent(tx, {
+      actorId: user.id,
+      action: 'COST_LINE_CREATED',
+      entityType: 'CostLine',
+      entityId: created.id,
+      contractFormId: formId,
+    });
+    return created;
+  });
 }
 
 export async function updateCostLine(
@@ -1546,8 +1638,8 @@ export async function updateCostLine(
 
   assertNonNegative(amount, 'amount');
 
-  return prisma.$transaction(async (tx) =>
-    tx.costLine.update({
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.costLine.update({
       where: { id: lineId },
       data: {
         ...input,
@@ -1559,8 +1651,17 @@ export async function updateCostLine(
           : {}),
         amount,
       },
-    })
-  );
+    });
+    await recordAuditEvent(tx, {
+      actorId: user.id,
+      action: 'COST_LINE_UPDATED',
+      entityType: 'CostLine',
+      entityId: lineId,
+      contractFormId: formId,
+      details: { changedFields: Object.keys(input).sort() },
+    });
+    return updated;
+  });
 }
 
 export async function deleteCostLine(
@@ -1585,11 +1686,19 @@ export async function deleteCostLine(
     );
   }
 
-  return prisma.$transaction(async (tx) =>
-    tx.costLine.delete({
+  return prisma.$transaction(async (tx) => {
+    const deleted = await tx.costLine.delete({
       where: { id: lineId },
-    })
-  );
+    });
+    await recordAuditEvent(tx, {
+      actorId: user.id,
+      action: 'COST_LINE_DELETED',
+      entityType: 'CostLine',
+      entityId: lineId,
+      contractFormId: formId,
+    });
+    return deleted;
+  });
 }
 
 export async function listEvaluations(
@@ -1673,6 +1782,19 @@ export async function saveEvaluations(
       );
     }
 
+    if (saved.length > 0) {
+      await recordAuditEvent(tx, {
+        actorId: user.id,
+        action: 'EVALUATIONS_UPDATED',
+        entityType: 'ContractForm',
+        entityId: formId,
+        contractFormId: formId,
+        details: {
+          evaluationCount: saved.length,
+          bidderIds: inputs.map((input) => input.bidderId),
+        },
+      });
+    }
     return saved;
   });
 }

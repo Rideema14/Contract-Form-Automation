@@ -35,5 +35,13 @@ Open http://localhost:3000 - it should show "Backend is running".
 `npm run db:generate`, `npm run db:migrate`, `npm run db:studio`, `npm run typecheck`, `npm test`, `npm run build`.
 Never run `prisma migrate reset` on a shared or production database.
 
+## Provision a local reviewer account
+Public registration is disabled. To create a local test reviewer, set `TEST_USER_EMAIL`,
+`TEST_USER_PASSWORD` (8–128 characters), and `TEST_USER_ROLE=APPROVER` in `backend/.env`,
+then run `npm run create:test-user` from `backend/`. The script only runs in development and
+requires the local `contract_automation` database. `TEST_USER_ROLE` can also be omitted
+(defaults to `SUBMITTER`); `ADMIN` is not available through this script. Existing accounts
+are left unchanged.
+
 ## Troubleshooting
 See the README troubleshooting table.
