@@ -7,6 +7,15 @@ import { ArrowLeft, LoaderCircle, Plus, Save, Send, Trash2 } from "lucide-react"
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -331,6 +340,7 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
   const [attempted, setAttempted] = useState(false);
   const [error, setError] = useState("");
   const [saveState, setSaveState] = useState<"All changes saved" | "Saving..." | "Unable to save. Retry.">("All changes saved");
+  const [submitReviewOpen, setSubmitReviewOpen] = useState(false);
   const [attachmentLimits, setAttachmentLimits] = useState<UploadLimits | null>(null);
   const [attachmentRefresh, setAttachmentRefresh] = useState(0);
   const [attachmentsUploading, setAttachmentsUploading] = useState(false);
@@ -350,6 +360,18 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
     () => validate(values, attempted, bidders, costLines, evals, approverIds, formSchema, dynamicValues),
     [values, attempted, bidders, costLines, evals, approverIds, formSchema, dynamicValues],
   );
+  const completionItems = useMemo(() => [
+    Boolean(values.title.trim() && values.referenceNo.trim()),
+    Boolean(values.scope.trim()),
+    Boolean(values.sponsorDepartmentId && values.contractCategoryId && values.procurementRationale.trim()),
+    bidders.length > 0,
+    Boolean(values.contractAmount && values.currencyId),
+    costLines.length > 0,
+    approverIds.length > 0,
+    Boolean(activeContractId),
+  ], [values, bidders.length, costLines.length, approverIds.length, activeContractId]);
+  const completionCount = completionItems.filter(Boolean).length;
+  const completionPercent = Math.round((completionCount / completionItems.length) * 100);
   const isEditable = !readOnly && edit && (!contract || contract.status === "DRAFT" || contract.status === "RETURNED");
 
   useEffect(() => {
@@ -548,7 +570,7 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
     return () => window.removeEventListener("pagehide", flushPendingChanges);
   }, [activeContractId, formSchema, readOnly]);
 
-  async function save(submit = false) {
+  async function save(submit = false, confirmed = false) {
     if (submit && (attachmentsUploading || preDraftUploadsPendingRef.current)) {
       toast.error("Wait for supporting document uploads to finish before submitting.");
       return;
@@ -564,8 +586,14 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
       toast.error(
         `Please fix ${messages.length} item${messages.length === 1 ? "" : "s"} before submitting. ${visibleMessages}${remainingCount > 0 ? ` And ${remainingCount} more.` : ""}`,
       );
+      document.querySelector('[role="alert"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
+    if (submit && !confirmed) {
+      setSubmitReviewOpen(true);
+      return;
+    }
+    setSubmitReviewOpen(false);
     setBusy(true);
     try {
       const saved = await persistMain();
@@ -761,14 +789,47 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
   const select = (key: FieldKey, label: string, options: { id: string; name: string }[], empty: string) => (
     <div className="space-y-2"><Label htmlFor={key}>{label}</Label><select id={key} className="h-9 w-full rounded-lg border bg-background px-2 text-sm" value={values[key]} onChange={(event) => setValue(key, event.target.value)}><option value="">{empty}</option>{options.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}</select>{errors[key] && <p className="text-sm text-destructive">{errors[key]}</p>}</div>
   );
+  function goToError(field: string) {
+    const sectionId =
+      field === "title" || field === "referenceNo" ? "project-identification"
+      : field === "scope" ? "project-description"
+      : field === "sponsorDepartmentId" || field === "contractCategoryId" || field === "procurementRationale" ? "contract-information"
+      : field.startsWith("quotation") || field.startsWith("evaluation") || field === "bidders" ? "bidder-management"
+      : field === "contractAmount" || field === "selectionRationale" || field === "recommendedBidderId" ? "financial-information"
+      : field === "costLines" ? "budget-information"
+      : field === "approverIds" ? "approval-workflow"
+      : "custom-form-fields";
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
   return <main className="min-h-screen bg-muted/30 p-4 sm:p-8"><div className="mx-auto flex max-w-6xl flex-col gap-6">
     <div className="flex flex-wrap items-center justify-between gap-4"><div><Link href={returnTo} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="size-4" />Back</Link><h1 className="mt-2 text-2xl font-bold">{contract ? "Edit contract" : "New contract"}</h1><p className={saveState === "Unable to save. Retry." ? "mt-1 text-sm text-destructive" : "mt-1 text-sm text-muted-foreground"}>{saveState}</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => void save()} disabled={busy || attachmentsUploading || saveInFlight.current !== null}><Save />Save draft</Button><Button onClick={() => void save(true)} disabled={busy || attachmentsUploading || preDraftUploadsPending || saveInFlight.current !== null}><Send />Submit</Button></div></div>
-    {attempted && Object.keys(errors).length > 0 && <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive"><p className="font-semibold">Complete these items before submitting:</p><ul className="mt-2 list-inside list-disc space-y-1">{Object.entries(errors).map(([field, message]) => <li key={field}>{message}</li>)}</ul></div>}
-    <Card className="order-1"><CardHeader><CardTitle>Project identification</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{input("title", "Project name / contractor / contract title")}{input("referenceNo", "Reference number", "text", true)}</CardContent></Card>
-    <Card className="order-2"><CardHeader><CardTitle>Project Description</CardTitle></CardHeader><CardContent><div className="space-y-2"><Label htmlFor="scope">Scope of work</Label><Textarea id="scope" value={values.scope} onChange={(event) => setValue("scope", event.target.value)} aria-invalid={Boolean(errors.scope)} />{errors.scope && <p className="text-sm text-destructive">{errors.scope}</p>}</div></CardContent></Card>
-    <Card className="order-3"><CardHeader><CardTitle>Contract information</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{select("sponsorDepartmentId", "Sponsor department", refs?.departments ?? [], "Select department")}{select("contractCategoryId", "Contract category", refs?.categories ?? [], "Select category")}<div className="md:col-span-2 space-y-2"><Label htmlFor="procurementRationale">Sourcing / procurement rationale</Label><Textarea id="procurementRationale" value={values.procurementRationale} onChange={(event) => setValue("procurementRationale", event.target.value)} aria-invalid={Boolean(errors.procurementRationale)} />{errors.procurementRationale && <p className="text-sm text-destructive">{errors.procurementRationale}</p>}</div></CardContent></Card>
-    <Card className="order-5"><CardHeader><CardTitle>Financial and vendor information</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{input("contractAmount", "Estimated contract amount", "number")}{select("currencyId", "Currency", (refs?.currencies ?? []).map((item) => ({ id: item.id, name: `${item.code} - ${item.name}` })), "Select currency")}<div className="space-y-2"><Label htmlFor="recommendedBidderId">Recommended bidder</Label><select id="recommendedBidderId" className="h-9 w-full rounded-lg border bg-background px-2 text-sm" value={values.recommendedBidderId} onChange={(event) => { setValue("recommendedBidderId", event.target.value); setValue("recommendedVendorId", ""); }}><option value="">No recommendation</option>{bidders.map((bidder) => <option key={bidder.id} value={bidder.id}>{bidder.companyName || bidder.vendor?.name}</option>)}</select>{bidders.length === 0 && <p className="text-sm text-muted-foreground">Please add a bidder in Bidder Management before selecting a recommended bidder.</p>}</div><div className="space-y-2"><Label htmlFor="selectionRationale">Selection rationale</Label><Textarea id="selectionRationale" value={values.selectionRationale} onChange={(event) => setValue("selectionRationale", event.target.value)} aria-invalid={Boolean(errors.selectionRationale)} />{errors.selectionRationale && <p className="text-sm text-destructive">{errors.selectionRationale}</p>}</div></CardContent></Card>
-    <Card className="order-4">
+    <section aria-label="Contract completion" className="sticky top-16 z-20 rounded-lg border bg-background/95 p-3 shadow-sm backdrop-blur">
+      <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+        <span className="font-medium">{completionPercent}% complete</span>
+        <span className="text-muted-foreground">{completionCount} of {completionItems.length} sections ready</span>
+      </div>
+      <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${completionPercent}%` }} /></div>
+      <nav aria-label="Contract form sections" className="flex gap-2 overflow-x-auto pb-1">
+        {[
+          ["project-identification", "Identification"],
+          ["project-description", "Description"],
+          ["contract-information", "Information"],
+          ["bidder-management", "Bidders"],
+          ["financial-information", "Financial"],
+          ["supporting-documents", "Documents"],
+          ["approval-workflow", "Approvals"],
+          ["budget-information", "Budget"],
+        ].map(([id, label]) => (
+          <button key={id} type="button" onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })} className="shrink-0 rounded-md border px-2.5 py-1.5 text-xs hover:bg-muted">{label}</button>
+        ))}
+      </nav>
+    </section>
+    {attempted && Object.keys(errors).length > 0 && <div role="alert" className="scroll-mt-36 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive"><p className="font-semibold">Complete these items before submitting:</p><ul className="mt-2 list-inside space-y-1">{Object.entries(errors).map(([field, message]) => <li key={field}><button type="button" className="text-left underline underline-offset-2" onClick={() => goToError(field)}>{message}</button></li>)}</ul></div>}
+    <Card id="project-identification" className="scroll-mt-40 order-1"><CardHeader><CardTitle>Project identification</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{input("title", "Project name / contractor / contract title")}{input("referenceNo", "Reference number", "text", true)}</CardContent></Card>
+    <Card id="project-description" className="scroll-mt-40 order-2"><CardHeader><CardTitle>Project Description</CardTitle></CardHeader><CardContent><div className="space-y-2"><Label htmlFor="scope">Scope of work</Label><Textarea id="scope" value={values.scope} onChange={(event) => setValue("scope", event.target.value)} aria-invalid={Boolean(errors.scope)} />{errors.scope && <p className="text-sm text-destructive">{errors.scope}</p>}</div></CardContent></Card>
+    <Card id="contract-information" className="scroll-mt-40 order-3"><CardHeader><CardTitle>Contract information</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{select("sponsorDepartmentId", "Sponsor department", refs?.departments ?? [], "Select department")}{select("contractCategoryId", "Contract category", refs?.categories ?? [], "Select category")}<div className="md:col-span-2 space-y-2"><Label htmlFor="procurementRationale">Sourcing / procurement rationale</Label><Textarea id="procurementRationale" value={values.procurementRationale} onChange={(event) => setValue("procurementRationale", event.target.value)} aria-invalid={Boolean(errors.procurementRationale)} />{errors.procurementRationale && <p className="text-sm text-destructive">{errors.procurementRationale}</p>}</div></CardContent></Card>
+    <Card id="financial-information" className="scroll-mt-40 order-5"><CardHeader><CardTitle>Financial and vendor information</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{input("contractAmount", "Estimated contract amount", "number")}{select("currencyId", "Currency", (refs?.currencies ?? []).map((item) => ({ id: item.id, name: `${item.code} - ${item.name}` })), "Select currency")}<div className="space-y-2"><Label htmlFor="recommendedBidderId">Recommended bidder</Label><select id="recommendedBidderId" className="h-9 w-full rounded-lg border bg-background px-2 text-sm" value={values.recommendedBidderId} onChange={(event) => { setValue("recommendedBidderId", event.target.value); setValue("recommendedVendorId", ""); }}><option value="">No recommendation</option>{bidders.map((bidder) => <option key={bidder.id} value={bidder.id}>{bidder.companyName || bidder.vendor?.name}</option>)}</select>{bidders.length === 0 && <p className="text-sm text-muted-foreground">Please add a bidder in Bidder Management before selecting a recommended bidder.</p>}</div><div className="space-y-2"><Label htmlFor="selectionRationale">Selection rationale</Label><Textarea id="selectionRationale" value={values.selectionRationale} onChange={(event) => setValue("selectionRationale", event.target.value)} aria-invalid={Boolean(errors.selectionRationale)} />{errors.selectionRationale && <p className="text-sm text-destructive">{errors.selectionRationale}</p>}</div></CardContent></Card>
+    <Card id="bidder-management" className="scroll-mt-40 order-4">
       <CardHeader><CardTitle>Bidder Management</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-4">
@@ -864,9 +925,9 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
         })}
       </CardContent>
     </Card>
-    <Card className="order-7"><CardHeader><CardTitle>Supporting documents</CardTitle></CardHeader><CardContent className="space-y-4"><AttachmentUploader formId={activeContractId} limits={attachmentLimits} onUploaded={() => setAttachmentRefresh((value) => value + 1)} onUploadStateChange={setAttachmentsUploading} onPreDraftPendingChange={updatePreDraftUploadsPending} />{activeContractId && <AttachmentList formId={activeContractId} refreshKey={attachmentRefresh} />}</CardContent></Card>
-    <Card className="order-8"><CardHeader><CardTitle>Approval Workflow</CardTitle></CardHeader><CardContent className="space-y-2"><p className="text-sm text-muted-foreground">Select the employees responsible for reviewing and approving this contract. Approvals will follow the sequence specified below.</p><Label htmlFor="contract-approver-search">Select an Approver</Label><ApproverSelect inputId="contract-approver-search" value={approverIds} onChange={setApproverIds} /></CardContent></Card>
-    <Card className="order-9">
+    <Card id="supporting-documents" className="scroll-mt-40 order-7"><CardHeader><CardTitle>Supporting documents</CardTitle></CardHeader><CardContent className="space-y-4"><AttachmentUploader formId={activeContractId} limits={attachmentLimits} onUploaded={() => setAttachmentRefresh((value) => value + 1)} onUploadStateChange={setAttachmentsUploading} onPreDraftPendingChange={updatePreDraftUploadsPending} />{activeContractId && <AttachmentList formId={activeContractId} refreshKey={attachmentRefresh} />}</CardContent></Card>
+    <Card id="approval-workflow" className="scroll-mt-40 order-8"><CardHeader><CardTitle>Approval Workflow</CardTitle></CardHeader><CardContent className="space-y-2"><p className="text-sm text-muted-foreground">Select the employees responsible for reviewing and approving this contract. Approvals will follow the sequence specified below.</p><Label htmlFor="contract-approver-search">Select an Approver</Label><ApproverSelect inputId="contract-approver-search" value={approverIds} onChange={setApproverIds} /></CardContent></Card>
+    <Card id="budget-information" className="scroll-mt-40 order-9">
       <CardHeader><CardTitle>Budget and cost information</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">Tax is not configured; tax is 0.00.</p>
@@ -916,11 +977,34 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
         </div>
       </CardContent>
     </Card>
-    <DynamicFormSections
-      definition={formSchema?.definition}
-      values={dynamicValues}
-      errors={errors}
-      onChange={setDynamicValue}
-    />
+    {formSchema?.definition.sections.length ? (
+      <section id="custom-form-fields" className="scroll-mt-40">
+        <DynamicFormSections
+          definition={formSchema.definition}
+          values={dynamicValues}
+          errors={errors}
+          onChange={setDynamicValue}
+        />
+      </section>
+    ) : null}
+    <Dialog open={submitReviewOpen} onOpenChange={setSubmitReviewOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Submit contract for approval?</DialogTitle>
+          <DialogDescription>
+            Review is complete. After submission, this contract will become read-only until it is returned for changes.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="rounded-lg border p-3 text-sm">
+          <p className="font-medium">{values.title || "Untitled contract"}</p>
+          <p className="mt-1 text-muted-foreground">{values.referenceNo || "Reference number will be assigned"}</p>
+          <p className="mt-1 text-muted-foreground">Approval levels: {approverIds.length}</p>
+        </div>
+        <DialogFooter>
+          <DialogClose render={<Button variant="outline" disabled={busy}>Cancel</Button>} />
+          <Button onClick={() => void save(true, true)} disabled={busy}><Send />Confirm and submit</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div></main>;
 }

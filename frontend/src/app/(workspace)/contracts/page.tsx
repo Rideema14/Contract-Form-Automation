@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   ChevronLeft,
@@ -94,6 +94,7 @@ function getErrorMessage(error: unknown): string {
 
 export default function ContractsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { authUser } = useAuth();
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [pagination, setPagination] = useState<PaginationMetadata>({
@@ -104,7 +105,12 @@ export default function ContractsPage() {
   });
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<ContractStatus | "ALL">("ALL");
+  const requestedStatus = searchParams.get("status");
+  const initialStatus =
+    requestedStatus && ["DRAFT", "PENDING_APPROVAL", "RETURNED", "APPROVED", "REJECTED"].includes(requestedStatus)
+      ? requestedStatus as ContractStatus
+      : "ALL";
+  const [status, setStatus] = useState<ContractStatus | "ALL">(initialStatus);
   const [page, setPage] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -334,7 +340,51 @@ export default function ContractsPage() {
                 </p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <>
+              <div className="space-y-3 md:hidden">
+                {contracts.map((contract) => {
+                  const isDraft = contract.status === "DRAFT";
+                  const canDelete =
+                    isAdmin ||
+                    (authUser?.role === "SUBMITTER" &&
+                      contract.createdById === authUser.id);
+                  return (
+                    <Card key={`mobile-${contract.id}`}>
+                      <CardContent className="space-y-3 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="font-medium break-words">{contract.title || "Untitled contract"}</p>
+                            <p className="text-xs text-muted-foreground">{contract.referenceNo || "No reference number"}</p>
+                          </div>
+                          <Badge variant={contract.status === "REJECTED" ? "destructive" : contract.status === "DRAFT" ? "secondary" : "outline"}>
+                            {statusLabels[contract.status]}
+                          </Badge>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                          <span>Amount: {formatAmount(contract)}</span>
+                          <span>Updated: {formatDate(contract.updatedAt)}</span>
+                        </div>
+                        <div className="flex gap-2">
+                          <Link href={`/contracts/${contract.id}?return=${encodeURIComponent("/contracts")}`} className={buttonVariants({ variant: "outline", size: "sm" })}>
+                            <Eye />View
+                          </Link>
+                          {isDraft && (
+                            <Link href={`/contracts/${contract.id}?edit=1&return=${encodeURIComponent("/contracts")}`} className={buttonVariants({ variant: "outline", size: "sm" })}>
+                              <Pencil />Edit
+                            </Link>
+                          )}
+                          {isDraft && canDelete && (
+                            <Button type="button" variant="destructive" size="sm" onClick={() => setDeleteTarget(contract)}>
+                              <Trash2 />Delete
+                            </Button>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+              <div className="hidden overflow-x-auto md:block">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -438,6 +488,7 @@ export default function ContractsPage() {
                 </TableBody>
               </Table>
               </div>
+              </>
             )}
 
             {!isLoading && !error && pagination.totalItems > 0 && (
