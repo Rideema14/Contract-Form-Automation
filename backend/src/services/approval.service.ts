@@ -205,6 +205,7 @@ export async function getApprovalHistory(contractFormId: string, user: AuthUser)
               'CONTRACT_FINAL_APPROVED',
               'CONTRACT_RETURNED',
               'CONTRACT_REJECTED',
+              'ATTACHMENT_DELETED',
             ],
           },
         },

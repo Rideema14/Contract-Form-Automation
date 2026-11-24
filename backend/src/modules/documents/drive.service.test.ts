@@ -7,6 +7,7 @@ function fakeDrive(overrides: Record<string, unknown> = {}) {
   const files = {
     list: vi.fn().mockResolvedValue({ data: { files: [] } }),
     create: vi.fn().mockResolvedValue({ data: { id: 'drive-1' } }),
+    update: vi.fn().mockResolvedValue({ data: { id: 'drive-1' } }),
     get: vi.fn().mockResolvedValue({ data: Readable.from(['hello']) }),
     delete: vi.fn().mockResolvedValue({}),
     ...overrides,
@@ -47,6 +48,7 @@ describe('createGoogleDriveStorage', () => {
       mimeType: 'application/pdf',
       body: Readable.from(['x']),
       contractFormId: 'form-1',
+      contractFolderName: 'CF-1 - Renovation - form1',
     });
     expect(result).toEqual({ driveFileId: 'drive-1' });
     expect(files.list).toHaveBeenCalledWith(expect.objectContaining({
@@ -56,9 +58,10 @@ describe('createGoogleDriveStorage', () => {
     }));
     expect(files.create).toHaveBeenNthCalledWith(1, expect.objectContaining({
       requestBody: {
-        name: 'form-1',
+        name: 'CF-1 - Renovation - form1',
         mimeType: 'application/vnd.google-apps.folder',
         parents: ['folder-1'],
+        appProperties: { contractFormId: 'form-1' },
       },
       supportsAllDrives: true,
     }));
@@ -82,12 +85,50 @@ describe('createGoogleDriveStorage', () => {
       mimeType: 'application/pdf',
       body: Readable.from(['x']),
       contractFormId: 'form-1',
+      contractFolderName: 'CF-1 - Renovation - form1',
     });
     expect(files.create).toHaveBeenCalledOnce();
     expect(files.create.mock.calls[0][0].requestBody).toEqual({
       name: 'a.pdf',
       parents: ['contract-folder'],
     });
+    expect(files.update).toHaveBeenCalledWith(expect.objectContaining({
+      fileId: 'contract-folder',
+      requestBody: {
+        name: 'CF-1 - Renovation - form1',
+        appProperties: { contractFormId: 'form-1' },
+      },
+    }));
+  });
+
+  it('renames a legacy UUID-named folder without creating a duplicate', async () => {
+    const { drive, files } = fakeDrive({
+      list: vi.fn()
+        .mockResolvedValueOnce({ data: { files: [] } })
+        .mockResolvedValueOnce({ data: { files: [{ id: 'legacy-folder' }] } }),
+    });
+    const storage = createGoogleDriveStorage({
+      drive,
+      folderId: 'root-folder',
+      authMode: 'service-account',
+    });
+
+    await storage.upload({
+      name: 'a.pdf',
+      mimeType: 'application/pdf',
+      body: Readable.from(['x']),
+      contractFormId: 'form-1',
+      contractFolderName: 'CF-1 - Renovation - form1',
+    });
+
+    expect(files.create).toHaveBeenCalledOnce();
+    expect(files.update).toHaveBeenCalledWith(expect.objectContaining({
+      fileId: 'legacy-folder',
+      requestBody: {
+        name: 'CF-1 - Renovation - form1',
+        appProperties: { contractFormId: 'form-1' },
+      },
+    }));
   });
 
   it('creates an app-owned root for OAuth when no existing folder is configured', async () => {
@@ -104,6 +145,7 @@ describe('createGoogleDriveStorage', () => {
       mimeType: 'application/pdf',
       body: Readable.from(['x']),
       contractFormId: 'form-1',
+      contractFolderName: 'CF-1 - Renovation - form1',
     });
 
     expect(files.create).toHaveBeenNthCalledWith(1, expect.objectContaining({
@@ -114,9 +156,10 @@ describe('createGoogleDriveStorage', () => {
     }));
     expect(files.create).toHaveBeenNthCalledWith(2, expect.objectContaining({
       requestBody: {
-        name: 'form-1',
+        name: 'CF-1 - Renovation - form1',
         mimeType: 'application/vnd.google-apps.folder',
         parents: ['app-root'],
+        appProperties: { contractFormId: 'form-1' },
       },
     }));
     expect(files.create).toHaveBeenNthCalledWith(3, expect.objectContaining({
@@ -136,11 +179,12 @@ describe('createGoogleDriveStorage', () => {
       mimeType: 'application/pdf',
       body: Readable.from(['x']),
       contractFormId: 'form-1',
+      contractFolderName: 'CF-1 - Renovation - form1',
     });
 
     await Promise.all([upload('a.pdf'), upload('b.pdf')]);
 
-    expect(files.list).toHaveBeenCalledOnce();
+    expect(files.list).toHaveBeenCalledTimes(2);
     expect(files.create).toHaveBeenCalledTimes(3);
   });
 
@@ -176,6 +220,7 @@ describe('createGoogleDriveStorage', () => {
         mimeType: 'application/pdf',
         body: Readable.from(['x']),
         contractFormId: 'form-1',
+        contractFolderName: 'CF-1 - Renovation - form1',
       })
     ).rejects.toBeInstanceOf(DriveError);
   });
@@ -194,6 +239,7 @@ describe('createGoogleDriveStorage', () => {
         mimeType: 'application/pdf',
         body: Readable.from(['x']),
         contractFormId: 'form-1',
+        contractFolderName: 'CF-1 - Renovation - form1',
       })
     ).rejects.toMatchObject({
       name: 'DriveError',

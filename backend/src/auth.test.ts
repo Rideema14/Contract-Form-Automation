@@ -2,7 +2,7 @@ import { describe, expect, it, afterEach, vi } from 'vitest';
 import request from 'supertest';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { UserRole } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
 import app from './app';
 import { prisma } from './lib/prisma';
 
@@ -125,6 +125,65 @@ describe('authentication', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.user.role).toBe(UserRole.APPROVER);
+  });
+
+  it('validates admin user creation payloads', async () => {
+    vi.spyOn(prisma.user, 'findUnique').mockResolvedValue({
+      ...activeUser,
+      role: UserRole.ADMIN,
+    } as never);
+    const token = jwt.sign({ sub: activeUser.id }, secret);
+
+    const response = await request(app)
+      .post('/api/users')
+      .set('Cookie', `contract_token=${token}`)
+      .send({
+        fullName: '',
+        email: 'not-an-email',
+        password: 'short',
+        role: 'INVALID',
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('validates admin user update types', async () => {
+    vi.spyOn(prisma.user, 'findUnique').mockResolvedValue({
+      ...activeUser,
+      role: UserRole.ADMIN,
+    } as never);
+    const token = jwt.sign({ sub: activeUser.id }, secret);
+
+    const response = await request(app)
+      .patch('/api/users/550e8400-e29b-41d4-a716-446655440002')
+      .set('Cookie', `contract_token=${token}`)
+      .send({ isActive: 'false' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('maps missing user updates to a structured 404', async () => {
+    vi.spyOn(prisma.user, 'findUnique').mockResolvedValue({
+      ...activeUser,
+      role: UserRole.ADMIN,
+    } as never);
+    vi.spyOn(prisma.user, 'update').mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Record to update not found', {
+        code: 'P2025',
+        clientVersion: 'test',
+      }),
+    );
+    const token = jwt.sign({ sub: activeUser.id }, secret);
+
+    const response = await request(app)
+      .patch('/api/users/550e8400-e29b-41d4-a716-446655440003')
+      .set('Cookie', `contract_token=${token}`)
+      .send({ isActive: false });
+
+    expect(response.status).toBe(404);
+    expect(response.body.error.code).toBe('NOT_FOUND');
   });
 
   it('clears the authentication cookie on logout', async () => {

@@ -188,10 +188,11 @@ export function NotificationBell() {
               </div>
             ) : (
               notifications.map((item) => (
-                <div
+                <button
+                  type="button"
                   key={item.id}
                   onClick={() => handleItemClick(item)}
-                  className={`flex items-start gap-3 p-3 text-xs cursor-pointer transition-colors hover:bg-muted/50 ${
+                  className={`flex w-full items-start gap-3 p-3 text-left text-xs cursor-pointer transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                     !item.isRead ? 'bg-primary/5' : ''
                   }`}
                 >
@@ -213,7 +214,7 @@ export function NotificationBell() {
                       )}
                     </div>
                   </div>
-                </div>
+                </button>
               ))
             )}
           </div>

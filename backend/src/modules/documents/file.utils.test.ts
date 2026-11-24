@@ -7,6 +7,7 @@ import {
   resolveDuplicateFilename,
   createStorageFilename,
   reserveUniqueFilePath,
+  buildContractDriveFolderName,
   InvalidFilenameError,
 } from './file.utils';
 
@@ -131,5 +132,36 @@ describe('reserveUniqueFilePath', () => {
     const nested = path.join(dir, 'nested', 'tmp');
     const reserved = await reserveUniqueFilePath(nested, 'a.pdf');
     expect(path.dirname(reserved)).toBe(path.resolve(nested));
+  });
+});
+
+describe('buildContractDriveFolderName', () => {
+  it('uses only the reference number when one is available', () => {
+    expect(buildContractDriveFolderName(
+      '12345678-1234-4234-8234-123456789abc',
+      'Office Renovation',
+      'CTR-2026-0001'
+    )).toBe('CTR-2026-0001');
+  });
+
+  it('uses a readable title and stable short id before a reference exists', () => {
+    expect(buildContractDriveFolderName(
+      '12345678-1234-4234-8234-123456789abc',
+      'Office Renovation',
+      null
+    )).toBe('Office Renovation - 12345678');
+  });
+
+  it('removes unsafe separators and bounds long folder names', () => {
+    const name = buildContractDriveFolderName(
+      '12345678-1234-4234-8234-123456789abc',
+      `${'A'.repeat(220)}\\Renovation`,
+      null
+    );
+
+    expect(name).toContain('A'.repeat(10));
+    expect(name).not.toContain('\\');
+    expect(name.length).toBeLessThanOrEqual(180);
+    expect(name.endsWith('12345678')).toBe(true);
   });
 });

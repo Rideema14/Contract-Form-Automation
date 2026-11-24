@@ -19,6 +19,7 @@ import {
   updateBidder,
   updateQuotation,
   updateContract,
+  assertCanDeleteAttachments,
 } from './services/contract.service';
 import { initializeOrResetApprovalWorkflow } from './services/approval.service';
 import * as contractService from './services/contract.service';
@@ -199,6 +200,77 @@ describe('contract deletion authorization', () => {
       deleteContract('form-1', approver, 'Unauthorized deletion'),
     ).rejects.toMatchObject({ statusCode: 403, code: 'FORBIDDEN' });
     expect(transaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('attachment deletion authorization', () => {
+  it('allows the creator to delete attachments only while the contract is editable', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: submitter.id,
+      status: ContractStatus.DRAFT,
+    } as never);
+
+    await expect(assertCanDeleteAttachments('form-1', submitter)).resolves.toBeUndefined();
+  });
+
+  it('allows Admins to delete attachments on non-editable contracts', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: submitter.id,
+      status: ContractStatus.APPROVED,
+    } as never);
+
+    await expect(assertCanDeleteAttachments('form-1', admin)).resolves.toBeUndefined();
+  });
+
+  it('denies non-creators and creators whose contracts are no longer editable', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: submitter.id,
+      status: ContractStatus.PENDING_APPROVAL,
+    } as never);
+
+    await expect(assertCanDeleteAttachments('form-1', submitter)).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'INVALID_STATE',
+    });
+    await expect(assertCanDeleteAttachments('form-1', approver)).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'FORBIDDEN',
+    });
+  });
+
+  it('rejects deletion for a missing contract', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue(null);
+
+    await expect(assertCanDeleteAttachments('missing-form', submitter)).rejects.toMatchObject({
+      statusCode: 404,
+      code: 'FORM_NOT_FOUND',
+    });
+  });
+
+  it('records attachment deletions in the contract audit history', async () => {
+    const create = vi.spyOn(prisma.auditLog, 'create').mockResolvedValue({ id: 'audit-1' } as never);
+
+    await contractService.recordAttachmentDeletion({
+      formId: 'form-1',
+      attachmentId: 'attachment-1',
+      actorId: admin.id,
+      category: 'SUPPORTING',
+      fileName: 'supporting.pdf',
+    });
+
+    expect(create).toHaveBeenCalledWith({
+      data: {
+        actorId: admin.id,
+        action: 'ATTACHMENT_DELETED',
+        entityType: 'Attachment',
+        entityId: 'attachment-1',
+        contractFormId: 'form-1',
+        details: { category: 'SUPPORTING', fileName: 'supporting.pdf' },
+      },
+    });
   });
 });
 
@@ -413,11 +485,22 @@ describe('contract service authorization and persistence', () => {
       definition: { sections: [] },
       publishedAt: new Date(),
     } as never);
-    const create = vi.spyOn(prisma.contractForm, 'create').mockResolvedValue({
+    const create = vi.fn().mockResolvedValue({
       id: 'form-1',
       status: ContractStatus.DRAFT,
       createdById: submitter.id,
-    } as never);
+    });
+    const year = new Date().getUTCFullYear();
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      contractForm: {
+        findMany: vi.fn().mockResolvedValue([{ referenceNo: `CF-${year}-0003` }]),
+        create,
+      },
+    };
+    vi.spyOn(prisma, '$transaction').mockImplementation(
+      async (callback) => callback(tx as never) as never,
+    );
 
     await createDraft(submitter, {
       title: 'Draft',
@@ -431,11 +514,10 @@ describe('contract service authorization and persistence', () => {
           status: ContractStatus.DRAFT,
           formSchemaVersionId: 'schema-v2',
           dynamicValues: {},
+          referenceNo: `CF-${year}-0004`,
         }),
       }),
     );
-
-    create.mockRestore();
   });
 
   it('rejects a stale published version when creating a contract', async () => {
@@ -656,6 +738,40 @@ describe('contract service authorization and persistence', () => {
         ]),
       }),
     );
+  });
+
+  it('assigns a reference number when loading a legacy draft without one', async () => {
+    const year = new Date().getUTCFullYear();
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: submitter.id,
+      status: ContractStatus.DRAFT,
+      referenceNo: null,
+    } as never);
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      contractForm: {
+        findUnique: vi.fn().mockResolvedValue({ referenceNo: null }),
+        findMany: vi.fn().mockResolvedValue([]),
+        updateMany,
+      },
+    };
+    vi.spyOn(prisma, '$transaction').mockImplementation(
+      async (callback) => callback(tx as never) as never,
+    );
+    vi.spyOn(prisma.contractForm, 'findUniqueOrThrow').mockResolvedValue({
+      id: 'form-1',
+      referenceNo: `CF-${year}-0001`,
+    } as never);
+
+    await expect(getContract('form-1', submitter)).resolves.toMatchObject({
+      referenceNo: `CF-${year}-0001`,
+    });
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'form-1', referenceNo: null },
+      data: { referenceNo: `CF-${year}-0001` },
+    });
   });
 
   it('allows an administrator to access another user contract', async () => {
