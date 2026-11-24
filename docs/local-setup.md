@@ -43,5 +43,14 @@ requires the local `contract_automation` database. `TEST_USER_ROLE` can also be 
 (defaults to `SUBMITTER`); `ADMIN` is not available through this script. Existing accounts
 are left unchanged.
 
+## Optional demo login cards
+The login page includes Admin, Approver, and Submitter demo cards. They are disabled by default.
+To enable them, configure `NEXT_PUBLIC_DEMO_LOGIN_ENABLED=true` and the matching
+`NEXT_PUBLIC_DEMO_<ROLE>_EMAIL` and `NEXT_PUBLIC_DEMO_<ROLE>_PASSWORD` values in
+`frontend/.env.local`, using accounts that already exist in a non-production database.
+Because `NEXT_PUBLIC_` values are included in browser code, these credentials are visible to
+all visitors. Use disposable demo accounts only; never use production users or passwords.
+Restart or rebuild the frontend after changing these values.
+
 ## Troubleshooting
 See the README troubleshooting table.

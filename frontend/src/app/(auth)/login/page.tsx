@@ -15,6 +15,36 @@ type FormErrors = {
   password?: string;
 };
 
+type DemoAccount = {
+  role: "ADMIN" | "APPROVER" | "SUBMITTER";
+  description: string;
+  email: string;
+  password: string;
+};
+
+const demoAccounts: DemoAccount[] = [
+  {
+    role: "ADMIN",
+    description: "Manage users, reference data, and audit history",
+    email: process.env.NEXT_PUBLIC_DEMO_ADMIN_EMAIL ?? "",
+    password: process.env.NEXT_PUBLIC_DEMO_ADMIN_PASSWORD ?? "",
+  },
+  {
+    role: "APPROVER",
+    description: "Review and decide on assigned contracts",
+    email: process.env.NEXT_PUBLIC_DEMO_APPROVER_EMAIL ?? "",
+    password: process.env.NEXT_PUBLIC_DEMO_APPROVER_PASSWORD ?? "",
+  },
+  {
+    role: "SUBMITTER",
+    description: "Create contracts and track their status",
+    email: process.env.NEXT_PUBLIC_DEMO_SUBMITTER_EMAIL ?? "",
+    password: process.env.NEXT_PUBLIC_DEMO_SUBMITTER_PASSWORD ?? "",
+  },
+];
+
+const demoLoginsEnabled = process.env.NEXT_PUBLIC_DEMO_LOGIN_ENABLED === "true";
+
 function validateForm(email: string, password: string): FormErrors {
   const errors: FormErrors = {};
   if (!email.trim()) {
@@ -74,6 +104,13 @@ export default function LoginPage() {
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  function fillDemoAccount(account: DemoAccount) {
+    setEmail(account.email);
+    setPassword(account.password);
+    setErrors({});
+    setServerError("");
   }
 
   if (isCheckingSession) {
@@ -227,6 +264,45 @@ export default function LoginPage() {
                 {isSubmitting ? "Signing in..." : "Sign in"}
               </Button>
             </form>
+
+            <section className="mt-6 border-t pt-5" aria-labelledby="demo-login-title">
+              <h3 id="demo-login-title" className="text-sm font-semibold">Explore with a demo role</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Select a role to fill its demo sign-in details.
+              </p>
+              <div className="mt-3 grid gap-2">
+                {demoAccounts.map((account) => {
+                  const configured = demoLoginsEnabled && Boolean(account.email.trim() && account.password);
+                  return (
+                    <Button
+                      key={account.role}
+                      type="button"
+                      variant="outline"
+                      className="h-auto w-full justify-start gap-3 p-3 text-left"
+                      disabled={!configured || isSubmitting}
+                      aria-label={`Fill ${account.role.toLowerCase()} demo credentials`}
+                      onClick={() => fillDemoAccount(account)}
+                    >
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                        {account.role.slice(0, 3)}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-medium">{account.role}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {configured ? account.email : "Demo account not configured"}
+                        </span>
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {configured ? "Fill" : "Unavailable"}
+                      </span>
+                    </Button>
+                  );
+                })}
+              </div>
+              <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+                Demo credentials are public to visitors. Use disposable accounts only; never configure real or production accounts here.
+              </p>
+            </section>
 
             <p className="mt-6 text-center text-xs text-muted-foreground">
               Contact your administrator if you need access.
