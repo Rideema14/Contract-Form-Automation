@@ -38,11 +38,11 @@ export default function DashboardPage() {
   if (!data) return <main className="flex min-h-[50vh] items-center justify-center"><LoaderCircle className="animate-spin" /></main>;
 
   const cards = [
-    ["All forms", data.counts.all],
-    ["Draft", data.counts.draft],
-    ["Pending approval", data.counts.pending],
-    ["Approved", data.counts.approved],
-    ["Returned / rejected", data.counts.rejected],
+    ["All forms", data.counts.all, "/contracts"],
+    ["Draft", data.counts.draft, "/contracts?status=DRAFT"],
+    ["Pending approval", data.counts.pending, "/contracts?status=PENDING_APPROVAL"],
+    ["Approved", data.counts.approved, "/contracts?status=APPROVED"],
+    ["Returned / rejected", data.counts.rejected, "/approvals"],
   ] as const;
 
   return (
@@ -57,11 +57,13 @@ export default function DashboardPage() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          {cards.map(([label, count]) => (
-            <Card key={label}>
-              <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">{label}</CardTitle></CardHeader>
-              <CardContent><p className="text-3xl font-bold">{count}</p></CardContent>
-            </Card>
+          {cards.map(([label, count, href]) => (
+            <Link key={label} href={href} className="rounded-xl focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+              <Card className="h-full transition-colors hover:border-primary/50 hover:bg-accent/40">
+                <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">{label}</CardTitle></CardHeader>
+                <CardContent><p className="text-3xl font-bold">{count}</p></CardContent>
+              </Card>
+            </Link>
           ))}
         </div>
 

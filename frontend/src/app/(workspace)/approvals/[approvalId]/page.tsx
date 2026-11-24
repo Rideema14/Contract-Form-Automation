@@ -205,7 +205,7 @@ if (refreshedDetail.contractFormId) {
           <CardTitle>Documents and attachments</CardTitle>
         </CardHeader>
         <CardContent>
-          <AttachmentList formId={stepDetail.contractFormId} refreshKey={attachmentRefresh} />
+          <AttachmentList formId={stepDetail.contractFormId} refreshKey={attachmentRefresh} canDelete={authUser?.role === 'ADMIN'} />
         </CardContent>
       </Card>
 

@@ -96,9 +96,9 @@ export function ResubmitWorkflowDialog({
                   Contract: {contractTitle}
                 </span>
               ) : null}
-              This contract was returned for changes. Resubmitting will reset the workflow to
-              Level 1 and notify the first approver. Past approval decisions and comments will be
-              preserved in the audit history.
+              This contract was returned for changes. Resubmitting will continue from the level
+              that returned it; previously approved levels will remain approved. Past approval
+              decisions and comments will be preserved in the audit history.
             </DialogDescription>
           </DialogHeader>
 

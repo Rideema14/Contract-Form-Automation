@@ -7,8 +7,32 @@ import bcrypt from 'bcryptjs';
 import { UserRole } from '@prisma/client';
 import { sendSuccess } from '../utils/response';
 import { AppError } from '../utils/app-error';
+import { z } from 'zod';
 
 const router = Router();
+
+const createUserSchema = z.object({
+  fullName: z.string().trim().min(1).max(255),
+  email: z.string().trim().email().max(255).transform((value) => value.toLowerCase()),
+  password: z.string().min(8).max(128),
+  role: z.enum(['ADMIN', 'SUBMITTER', 'APPROVER']).default('SUBMITTER'),
+  departmentId: z.string().uuid().nullable().optional(),
+}).strict();
+
+const updateUserSchema = z.object({
+  role: z.enum(['ADMIN', 'SUBMITTER', 'APPROVER']).optional(),
+  isActive: z.boolean().optional(),
+  departmentId: z.string().uuid().nullable().optional(),
+  fullName: z.string().trim().min(1).max(255).optional(),
+}).strict();
+
+function parseUserInput<T>(schema: z.ZodType<T>, input: unknown): T {
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Validation failed', parsed.error.issues);
+  }
+  return parsed.data;
+}
 
 router.use(authenticate);
 
@@ -29,21 +53,11 @@ router.get('/', requireRoles(UserRole.ADMIN), async (req, res, next) => {
 
 router.post('/', requireRoles(UserRole.ADMIN), async (req, res, next) => {
   try {
-    const { fullName, email, password, role = 'SUBMITTER', departmentId = null } = req.body as {
-      fullName?: string; email?: string; password?: string; role?: UserRole; departmentId?: string | null;
-    };
-    if (!fullName?.trim() || !email?.trim() || !password) {
-      throw new AppError(400, 'VALIDATION_ERROR', 'Name, email and password are required');
-    }
-    if (password.length < 8) {
-      throw new AppError(400, 'VALIDATION_ERROR', 'Password must be at least 8 characters');
-    }
-    if (!Object.values(UserRole).includes(role)) {
-      throw new AppError(400, 'VALIDATION_ERROR', 'Invalid user role');
-    }
+    const { fullName, email, password, role = 'SUBMITTER', departmentId = null } =
+      parseUserInput(createUserSchema, req.body);
     const passwordHash = await bcrypt.hash(password, 12);
     const user = await prisma.user.create({
-      data: { fullName: fullName.trim(), email: email.trim().toLowerCase(), passwordHash, role, departmentId },
+      data: { fullName, email, passwordHash, role, departmentId },
       select: { id: true, fullName: true, email: true, role: true, isActive: true, departmentId: true, createdAt: true },
     });
     sendSuccess(req, res, 201, 'User created', user);
@@ -55,12 +69,11 @@ router.post('/', requireRoles(UserRole.ADMIN), async (req, res, next) => {
 router.patch('/:id', requireRoles(UserRole.ADMIN), async (req, res, next) => {
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const { role, isActive, departmentId, fullName } = req.body as {
-      role?: UserRole; isActive?: boolean; departmentId?: string | null; fullName?: string;
-    };
-    if (role !== undefined && !Object.values(UserRole).includes(role)) {
-      throw new AppError(400, 'VALIDATION_ERROR', 'Invalid user role');
+    if (!z.string().uuid().safeParse(id).success) {
+      throw new AppError(400, 'VALIDATION_ERROR', 'Invalid user ID');
     }
+    const { role, isActive, departmentId, fullName } =
+      parseUserInput(updateUserSchema, req.body);
     const user = await prisma.user.update({
       where: { id },
       data: {

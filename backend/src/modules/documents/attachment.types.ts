@@ -31,7 +31,8 @@ export interface AttachmentRepository {
   create(data: NewAttachment): Promise<AttachmentRecord>;
   findById(id: string): Promise<AttachmentRecord | null>;
   listByContract(contractFormId: string): Promise<AttachmentRecord[]>;
-  delete(id: string): Promise<void>;
+  delete(id: string): Promise<boolean>;
+  restore(record: AttachmentRecord): Promise<void>;
 }
 
 /** In-memory repository for tests and local development. */
@@ -51,7 +52,10 @@ export class InMemoryAttachmentRepository implements AttachmentRepository {
       .filter((r) => r.contractFormId === contractFormId)
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   }
-  async delete(id: string): Promise<void> {
-    this.rows.delete(id);
+  async delete(id: string): Promise<boolean> {
+    return this.rows.delete(id);
+  }
+  async restore(record: AttachmentRecord): Promise<void> {
+    this.rows.set(record.id, record);
   }
 }

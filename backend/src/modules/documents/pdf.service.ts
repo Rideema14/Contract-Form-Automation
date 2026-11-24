@@ -12,6 +12,11 @@ export interface FinalPdfSource {
     referenceNo: string | null;
     title: string | null;
     status: string;
+    approvalSteps?: Array<{
+      level: number;
+      status: string;
+      approver?: { fullName: string } | null;
+    }>;
     scope: string | null;
     procurementRationale: string | null;
     selectionRationale: string | null;

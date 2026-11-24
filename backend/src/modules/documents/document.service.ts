@@ -54,6 +54,7 @@ export class DocumentService {
    */
   async uploadAttachments(input: {
     contractFormId: string;
+    contractFolderName: string;
     category: UserUploadCategory;
     uploadedById: string;
     files: UploadedFile[];
@@ -91,6 +92,7 @@ export class DocumentService {
           mimeType: file.mimetype,
           body: createReadStream(file.path),
           contractFormId: input.contractFormId,
+          contractFolderName: input.contractFolderName,
         });
         driveFileIds.push(driveFileId);
         created.push(
@@ -133,6 +135,50 @@ export class DocumentService {
 
   list(contractFormId: string): Promise<AttachmentRecord[]> {
     return this.deps.repository.listByContract(contractFormId);
+  }
+
+  async deleteAttachment(contractFormId: string, attachmentId: string): Promise<AttachmentRecord> {
+    const { drive, repository } = this.deps;
+    const record = await repository.findById(attachmentId);
+    if (!record || record.contractFormId !== contractFormId) {
+      throw new AppError(404, 'ATTACHMENT_NOT_FOUND', 'Attachment not found');
+    }
+    if (record.category === 'GENERATED_PDF') {
+      throw new AppError(409, 'SYSTEM_ATTACHMENT', 'Generated contract PDFs cannot be deleted individually');
+    }
+
+    const deleted = await repository.delete(record.id);
+    if (!deleted) {
+      throw new AppError(404, 'ATTACHMENT_NOT_FOUND', 'Attachment not found');
+    }
+
+    try {
+      await drive.remove(record.driveFileId);
+    } catch (storageError) {
+      try {
+        await repository.restore(record);
+      } catch (restoreError) {
+        console.error('Attachment deletion rollback failed', {
+          contractFormId,
+          attachmentId,
+          driveFileId: record.driveFileId,
+          storageError,
+          restoreError,
+        });
+        throw new AppError(
+          500,
+          'DOCUMENT_CLEANUP_FAILED',
+          'Attachment deletion failed and its metadata could not be restored. Contact an administrator.'
+        );
+      }
+      throw new AppError(
+        502,
+        'DRIVE_DELETE_FAILED',
+        'The attachment could not be removed from storage. Its metadata was restored; please try again.'
+      );
+    }
+
+    return record;
   }
 
   async deleteFilesForContract(contractFormId: string): Promise<void> {
@@ -184,6 +230,7 @@ export class DocumentService {
   /** System use (final PDF): stores a buffer as an attachment. */
   async storeGeneratedFile(input: {
     contractFormId: string;
+    contractFolderName: string;
     category: AttachmentCategory;
     uploadedById: string;
     fileName: string;
@@ -198,6 +245,7 @@ export class DocumentService {
       mimeType: input.mimeType,
       body: Readable.from(input.content),
       contractFormId: input.contractFormId,
+      contractFolderName: input.contractFolderName,
     });
     try {
       return await repository.create({

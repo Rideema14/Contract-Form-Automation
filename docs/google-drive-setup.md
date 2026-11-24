@@ -17,12 +17,17 @@ Download: backend checks access again. A Drive File ID alone is not authorizatio
 
 The backend creates/reuses one child folder per contract under the app-owned/configured root. It does not create public permissions. Files are downloaded through authorized backend routes; the Drive ID is never returned to the browser.
 
+Contract folders use the contract reference number as their name. New references are assigned when
+a draft is first saved, before supporting files can be uploaded. Existing UUID-named folders are
+renamed in place the next time a file is uploaded or the final PDF is stored. Uploaded supporting
+document filenames remain intact inside that folder; generated final PDFs use the reference number.
+
 ## Rules
 - A public API key is not sufficient for private uploads. Never set files to "Anyone with the link".
 - Never put credentials in the frontend or in `NEXT_PUBLIC_` variables.
 - Metadata stored per file: Drive File ID, original filename, MIME type, category, uploader, upload date, related contract ID.
 - Drive upload and the database save are not one transaction: log failures and provide retry/cleanup for orphaned files.
 - Keep OAuth secrets, `backend/secrets/`, and `backend/.env` out of source control. The repository ignores both.
-- The approved file policy is in `backend/.env.example`: 10 MiB per file, up to 5 files per request, and the agreed extension list. Contract records and documents are retained for the contract lifetime; audit logs for at least 7 years. No automatic deletion is permitted.
+- The approved file policy is in `backend/.env.example`: 10 MiB per file, up to 5 files per request, and the agreed extension list. Contract records are retained for the contract lifetime and audit logs for at least 7 years. Documents are not deleted automatically; an Admin may manually delete individual user-uploaded attachments at any time, while the creator may do so only for draft or returned contracts. Successful attachment deletions are recorded in audit history.
 - The selected account model is personal My Drive with OAuth and `drive.file`; the app-created root folder avoids granting access to the user's entire Drive.
 - Implementation: `backend/src/modules/documents/drive.service.ts`, `backend/src/modules/documents/documents.runtime.ts`, and `backend/src/modules/documents/attachments.router.ts`.
