@@ -7,6 +7,7 @@ import { prisma } from '../lib/prisma';
 import { AppError } from '../utils/app-error';
 import { ContractDraftInput, CreateContractInput } from '../schemas/contract.schema';
 import { formSchemaDefinitionSchema } from '../schemas/form-builder.schema';
+import type { CostEstimateRowInput } from './cost-estimate-excel.service';
 import {
   getLatestFormSchema,
   normalizeDynamicValues,
@@ -238,7 +239,9 @@ export async function createDraft(
         ...contractInput,
         formSchemaVersionId: latestSchema.id,
         dynamicValues: normalizedValues as Prisma.InputJsonValue,
+        budgetProvision: decimal(input.budgetProvision),
         contractAmount: decimal(input.contractAmount),
+        taxAmount: decimal(input.taxAmount) ?? new Prisma.Decimal(0),
         createdById: user.id,
         status: ContractStatus.DRAFT,
       },
@@ -519,13 +522,26 @@ export async function updateContract(
   }
 
   try {
+    const {
+      contractAmount,
+      budgetProvision,
+      taxAmount,
+      ...nonMonetaryInput
+    } = normalizedInput;
+
     return await prisma.contractForm.update({
       where: { id: formId },
       data: {
-        ...normalizedInput,
+        ...nonMonetaryInput,
         ...(normalizedDynamicValues !== undefined ? { dynamicValues: normalizedDynamicValues } : {}),
         ...(Object.prototype.hasOwnProperty.call(input, 'contractAmount')
-          ? { contractAmount: decimal(input.contractAmount) }
+          ? { contractAmount: decimal(contractAmount) }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(input, 'budgetProvision')
+          ? { budgetProvision: decimal(budgetProvision) }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(input, 'taxAmount')
+          ? { taxAmount: decimal(taxAmount) ?? new Prisma.Decimal(0) }
           : {}),
       },
     });
@@ -769,6 +785,10 @@ async function validateSubmission(formId: string) {
     requiredDecimal(form.contractAmount, 'contractAmount'),
     'contractAmount'
   );
+  if (form.budgetProvision != null) {
+    assertNonNegative(form.budgetProvision, 'budgetProvision');
+  }
+  assertNonNegative(form.taxAmount, 'taxAmount');
 
   if (
     (form.recommendedVendorId || form.recommendedBidderId) &&
@@ -953,6 +973,7 @@ export async function createBidder(
   user: AuthUser,
   input: {
     vendorId?: string | null;
+    vendorTypeId?: string | null;
     companyName?: string;
     contactPerson?: string | null;
     email?: string | null;
@@ -962,6 +983,7 @@ export async function createBidder(
   }
 ) {
   await getEditableForm(formId, user);
+  const { vendorTypeId: _vendorTypeId, ...bidderInput } = input;
 
   const vendor = input.vendorId
     ? await prisma.vendor.findUnique({
@@ -1015,9 +1037,33 @@ export async function createBidder(
     });
     const sortOrder = (last._max.sortOrder ?? -1) + 1;
 
+    let bidderVendorId = input.vendorId;
+    if (!bidderVendorId && input.vendorTypeId) {
+      const vendorType = await tx.vendorType.findUnique({
+        where: { id: input.vendorTypeId },
+      });
+      if (!vendorType) {
+        throw new AppError(404, 'VENDOR_TYPE_NOT_FOUND', 'Vendor type not found');
+      }
+      const createdVendor = await tx.vendor.create({
+        data: {
+          name: companyName,
+          vendorTypeId: input.vendorTypeId,
+          contactDetails: {
+            contactPerson: input.contactPerson || null,
+            email: input.email || null,
+            phone: input.phone || null,
+            qualifications: input.qualifications || null,
+          },
+        },
+      });
+      bidderVendorId = createdVendor.id;
+    }
+
     return tx.bidder.create({
       data: {
-        ...input,
+        ...bidderInput,
+        vendorId: bidderVendorId,
         sortOrder,
         companyName,
         contractFormId: formId,
@@ -1359,7 +1405,7 @@ export async function getCostEstimate(
   formId: string,
   user: AuthUser
 ) {
-  await getAccessibleForm(formId, user);
+  const form = await getAccessibleForm(formId, user);
 
   const lines = await prisma.costLine.findMany({
     where: { contractFormId: formId },
@@ -1374,8 +1420,8 @@ export async function getCostEstimate(
   return {
     lines,
     subtotal,
-    tax: new Prisma.Decimal(0),
-    total: subtotal,
+    tax: form.taxAmount,
+    total: subtotal.add(form.taxAmount),
   };
 }
 
@@ -1408,6 +1454,39 @@ export async function createCostLine(
       },
     })
   );
+}
+
+export async function importCostLines(
+  formId: string,
+  user: AuthUser,
+  rows: CostEstimateRowInput[],
+) {
+  await getEditableForm(formId, user);
+
+  return prisma.$transaction(async (tx) => {
+    const last = await tx.costLine.aggregate({
+      where: { contractFormId: formId },
+      _max: { sortOrder: true },
+    });
+    const firstSortOrder = (last._max.sortOrder ?? -1) + 1;
+    const created = [];
+
+    for (const [index, row] of rows.entries()) {
+      const amount = calculateCostAmount(row.quantity, row.unitCost);
+      created.push(await tx.costLine.create({
+        data: {
+          contractFormId: formId,
+          description: row.description,
+          quantity: new Prisma.Decimal(row.quantity),
+          unitCost: new Prisma.Decimal(row.unitCost),
+          amount,
+          sortOrder: firstSortOrder + index,
+        },
+      }));
+    }
+
+    return created;
+  });
 }
 
 export async function updateCostLine(

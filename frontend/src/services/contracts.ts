@@ -1,4 +1,5 @@
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiRequest, apiRequestWithMeta } from "@/lib/api-client";
+import { ApiError, API_BASE_URL } from "@/lib/api-client";
 import type {
   Bidder,
   Contract,
@@ -13,6 +14,7 @@ import type {
   Quotation,
   ReferenceData,
 } from "@/types/contracts";
+import type { ApiErrorResponse, ApiSuccessResponse } from "@/types/api";
 
 export type ContractListParams = {
   page: number;
@@ -108,11 +110,11 @@ export function listBidders(formId: string): Promise<{ items: Bidder[] }> {
   return apiGet<{ items: Bidder[] }>(`/forms/${formId}/bidders`);
 }
 
-export function createBidder(formId: string, body: { vendorId?: string | null; companyName?: string; contactPerson?: string | null; email?: string | null; phone?: string | null; qualifications?: string | null; sortOrder?: number }): Promise<Bidder> {
+export function createBidder(formId: string, body: { vendorId?: string | null; vendorTypeId?: string | null; companyName?: string; contactPerson?: string | null; email?: string | null; phone?: string | null; qualifications?: string | null; sortOrder?: number }): Promise<Bidder> {
   return apiPost<Bidder>(`/forms/${formId}/bidders`, body);
 }
 
-export function updateBidder(formId: string, bidderId: string, body: Partial<{ vendorId: string | null; companyName: string; contactPerson: string | null; email: string | null; phone: string | null; qualifications: string | null; sortOrder: number }>): Promise<Bidder> {
+export function updateBidder(formId: string, bidderId: string, body: Partial<{ vendorId: string | null; vendorTypeId: string | null; companyName: string; contactPerson: string | null; email: string | null; phone: string | null; qualifications: string | null; sortOrder: number }>): Promise<Bidder> {
   return apiPatch<Bidder>(`/forms/${formId}/bidders/${bidderId}`, body);
 }
 
@@ -142,6 +144,76 @@ export function updateCostLine(formId: string, lineId: string, body: Partial<{ d
 
 export function deleteCostLine(formId: string, lineId: string): Promise<{ id: string }> {
   return apiDelete<{ id: string }>(`/forms/${formId}/cost-lines/${lineId}`);
+}
+
+function responseError(payload: unknown, status: number): Error {
+  if (
+    typeof payload === "object" &&
+    payload !== null &&
+    "success" in payload &&
+    payload.success === false &&
+    "message" in payload &&
+    typeof payload.message === "string"
+  ) {
+    return new ApiError(payload as ApiErrorResponse, status);
+  }
+  return new Error(`API request failed: ${status}`);
+}
+
+export async function downloadCostEstimateTemplate(): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/forms/cost-estimate/template`, {
+    credentials: "include",
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => undefined);
+    throw responseError(payload, response.status);
+  }
+
+  const objectUrl = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = "cost-estimate-template.xlsx";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+}
+
+export async function importCostEstimate(
+  formId: string,
+  file: File,
+): Promise<CostLine[]> {
+  const body = new FormData();
+  body.append("file", file);
+
+  const response = await fetch(
+    `${API_BASE_URL}/forms/${encodeURIComponent(formId)}/cost-lines/import`,
+    {
+      method: "POST",
+      credentials: "include",
+      body,
+      cache: "no-store",
+    },
+  );
+  const payload: unknown = await response.json().catch(() => undefined);
+  if (!response.ok) throw responseError(payload, response.status);
+
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    !("success" in payload) ||
+    payload.success !== true ||
+    !("data" in payload) ||
+    typeof payload.data !== "object" ||
+    payload.data === null ||
+    !("items" in payload.data) ||
+    !Array.isArray(payload.data.items)
+  ) {
+    throw new Error("The server returned an invalid cost import response.");
+  }
+
+  return (payload as ApiSuccessResponse<{ items: CostLine[] }>).data.items;
 }
 
 export function saveEvaluations(formId: string, evaluations: Array<{ bidderId: string; type: "TECHNICAL" | "COMMERCIAL"; score?: string | null; remarks?: string | null }>): Promise<{ items: Evaluation[] }> {

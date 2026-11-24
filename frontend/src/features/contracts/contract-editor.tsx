@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, LoaderCircle, Plus, Save, Send, Trash2 } from "lucide-react";
+import { ArrowLeft, Download, LoaderCircle, Plus, Save, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,7 +14,7 @@ import { apiErrorMessage } from "@/lib/api-client";
 import {
   createBidder, createContract, createCostLine, createQuotation, deleteBidder,
   deleteCostLine, deleteQuotation, getContract, getPublishedFormSchema, getReferenceData, saveEvaluations,
-  submitContract, updateBidder, updateContract, updateCostLine, updateQuotation,
+  downloadCostEstimateTemplate, importCostEstimate, submitContract, updateBidder, updateContract, updateCostLine, updateQuotation,
 } from "@/services/contracts";
 import type { Bidder, Contract, ContractDraft, CostLine, DynamicValues, Evaluation, FormSchemaVersion, ReferenceData } from "@/types/contracts";
 import { ApproverSelect } from "@/components/approvals/ApproverSelect";
@@ -34,7 +34,8 @@ type EvalDraft = { bidderId: string; type: "TECHNICAL" | "COMMERCIAL"; score: st
 
 const emptyValues: FormValues = {
   referenceNo: "", title: "", sponsorDepartmentId: "", contractCategoryId: "", scope: "",
-  procurementRationale: "", contractAmount: "", currencyId: "", recommendedVendorId: "", selectionRationale: "",
+  procurementRationale: "", budgetProvision: "", contractAmount: "", taxAmount: "",
+  currencyId: "", recommendedVendorId: "", selectionRationale: "",
   recommendedBidderId: "",
 };
 
@@ -53,13 +54,22 @@ function calculatedAmount(quantity: string, unitCost: string) {
   return `${digits.slice(0, -scale)}.${digits.slice(-scale)}`.replace(/\.?0+$/, "");
 }
 
-function costTotal(lines: CostLine[]) {
-  const scaled = lines.reduce((sum, line) => {
-    const [whole, fraction = ""] = line.amount.split(".");
+function sumMoney(values: string[]) {
+  const scaled = values.reduce((sum, value) => {
+    const [whole, fraction = ""] = value.split(".");
     return sum + BigInt(whole + fraction.padEnd(4, "0"));
   }, BigInt(0));
   const digits = scaled.toString().padStart(5, "0");
   return `${digits.slice(0, -4)}.${digits.slice(-4)}`;
+}
+
+function costTotal(lines: CostLine[]) {
+  return sumMoney(lines.map((line) => line.amount));
+}
+
+function totalWithTax(lines: CostLine[], taxAmount: string) {
+  if (taxAmount && !/^\d+(?:\.\d{1,4})?$/.test(taxAmount)) return "—";
+  return sumMoney([...lines.map((line) => line.amount), taxAmount || "0"]);
 }
 
 function contractValues(contract: Contract): FormValues {
@@ -67,7 +77,8 @@ function contractValues(contract: Contract): FormValues {
     referenceNo: contract.referenceNo ?? "", title: contract.title ?? "",
     sponsorDepartmentId: contract.sponsorDepartmentId ?? "", contractCategoryId: contract.contractCategoryId ?? "",
     scope: contract.scope ?? "", procurementRationale: contract.procurementRationale ?? "",
-    contractAmount: contract.contractAmount ?? "", currencyId: contract.currencyId ?? "",
+    budgetProvision: contract.budgetProvision ?? "", contractAmount: contract.contractAmount ?? "",
+    taxAmount: contract.taxAmount ?? "0", currencyId: contract.currencyId ?? "",
     recommendedVendorId: contract.recommendedVendorId ?? "", recommendedBidderId: contract.recommendedBidderId ?? "",
     selectionRationale: contract.selectionRationale ?? "",
   };
@@ -90,7 +101,9 @@ function validate(
   if (!values.contractCategoryId) errors.contractCategoryId = "Contract category is required.";
   if (!values.scope.trim()) errors.scope = "Scope of work is required.";
   if (!values.procurementRationale.trim()) errors.procurementRationale = "Procurement rationale is required.";
+  if (values.budgetProvision && !/^\d+(?:\.\d{1,4})?$/.test(values.budgetProvision)) errors.budgetProvision = "Enter a non-negative amount with up to 4 decimals.";
   if (!/^\d+(?:\.\d{1,4})?$/.test(values.contractAmount)) errors.contractAmount = "Enter a non-negative amount with up to 4 decimals.";
+  if (values.taxAmount && !/^\d+(?:\.\d{1,4})?$/.test(values.taxAmount)) errors.taxAmount = "Enter a non-negative amount with up to 4 decimals.";
   if ((values.recommendedVendorId || values.recommendedBidderId) && !values.selectionRationale.trim()) errors.selectionRationale = "Selection rationale is required.";
   if (!bidders.length) errors.bidders = "Bidder Management: add at least one bidder.";
   for (const bidder of bidders) {
@@ -219,6 +232,7 @@ function ReadOnlyContractForm({
           <CardHeader><CardTitle>Financial and Vendor Information</CardTitle></CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2">
             <ReadOnlyField label="Estimated contract amount" value={values.contractAmount} />
+            <ReadOnlyField label="Budget provision" value={values.budgetProvision} />
             <ReadOnlyField label="Currency" value={currency ? `${currency.code} - ${currency.name}` : undefined} />
             <ReadOnlyField label="Recommended bidder" value={recommendedBidder?.companyName || recommendedBidder?.vendor?.name || contract.recommendedVendor?.name} />
             <ReadOnlyField label="Selection rationale" value={values.selectionRationale} wide />
@@ -279,7 +293,6 @@ function ReadOnlyContractForm({
         <Card>
           <CardHeader><CardTitle>Budget and Cost Information</CardTitle></CardHeader>
           <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">Tax is not configured; tax is 0.00.</p>
             {costLines.length === 0 ? <p className="text-sm text-muted-foreground">No cost lines recorded.</p> : (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[36rem] text-sm">
@@ -289,7 +302,9 @@ function ReadOnlyContractForm({
               </div>
             )}
             <div className="flex flex-wrap justify-end gap-x-6 gap-y-1 border-t pt-3 text-sm">
-              <span>Subtotal: {costTotal(costLines)}</span><span>Tax: 0.0000</span><strong>Total: {costTotal(costLines)}</strong>
+              <span>Subtotal: {costTotal(costLines)}</span>
+              <span>Tax amount: {sumMoney([values.taxAmount || "0"])}</span>
+              <strong>Total including tax: {totalWithTax(costLines, values.taxAmount)}</strong>
             </div>
           </CardContent>
         </Card>
@@ -320,10 +335,14 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
   const [bidders, setBidders] = useState<Bidder[]>([]);
   const [newVendor, setNewVendor] = useState("");
   const [companySelection, setCompanySelection] = useState("");
+  const [companyQuery, setCompanyQuery] = useState("");
+  const [newVendorTypeId, setNewVendorTypeId] = useState("");
   const [newCompany, setNewCompany] = useState<CompanyDetails>(emptyCompanyDetails);
   const [quotationDrafts, setQuotationDrafts] = useState<Record<string, QuotationDraft>>({});
   const [costLines, setCostLines] = useState<CostLine[]>([]);
   const [costDraft, setCostDraft] = useState<CostDraft>({ description: "", quantity: "", unitCost: "", amount: "" });
+  const [importingCostEstimate, setImportingCostEstimate] = useState(false);
+  const costEstimateFileRef = useRef<HTMLInputElement>(null);
   const [evals, setEvals] = useState<EvalDraft[]>([]);
   const [approverIds, setApproverIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -430,7 +449,9 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
       contractCategoryId: currentValues.contractCategoryId || null,
       scope: currentValues.scope.trim() || null,
       procurementRationale: currentValues.procurementRationale.trim() || null,
+      budgetProvision: currentValues.budgetProvision.trim() || null,
       contractAmount: currentValues.contractAmount.trim() || null,
+      taxAmount: currentValues.taxAmount.trim() || "0",
       currencyId: currentValues.currencyId || null,
       recommendedVendorId: currentValues.recommendedVendorId || null,
       selectionRationale: currentValues.selectionRationale.trim() || null,
@@ -513,7 +534,9 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
         contractCategoryId: body.contractCategoryId || null,
         scope: body.scope.trim() || null,
         procurementRationale: body.procurementRationale.trim() || null,
+        budgetProvision: body.budgetProvision.trim() || null,
         contractAmount: body.contractAmount.trim() || null,
+        taxAmount: body.taxAmount.trim() || "0",
         currencyId: body.currencyId || null,
         recommendedVendorId: body.recommendedVendorId || null,
         recommendedBidderId: body.recommendedBidderId || null,
@@ -604,11 +627,16 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
       toast.error("Enter a company name for the new company.");
       return;
     }
+    if (companySelection === "__new__" && !newVendorTypeId) {
+      toast.error("Select a vendor type for the new company.");
+      return;
+    }
     const selectedCompany = refs?.vendors.find((vendor) => vendor.id === companySelection);
     const existingContact = companyContactFields(selectedCompany?.contactDetails);
     try {
       const bidder = await createBidder(form.id, {
         vendorId: companySelection === "__new__" ? null : newVendor || null,
+        vendorTypeId: companySelection === "__new__" ? newVendorTypeId : null,
         companyName: companySelection === "__new__" ? newCompany.companyName : undefined,
         contactPerson: companySelection === "__new__" ? newCompany.contactPerson || null : existingContact.contactPerson || null,
         email: companySelection === "__new__" ? newCompany.email || null : existingContact.email || null,
@@ -617,7 +645,9 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
       });
       setBidders((current) => [...current, { ...bidder, quotations: bidder.quotations ?? [] }]);
       setNewVendor("");
+      setNewVendorTypeId("");
       setCompanySelection("");
+      setCompanyQuery("");
       setNewCompany(emptyCompanyDetails);
       toast.success("Bidder added.");
     } catch (createError) {
@@ -715,7 +745,8 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
       return;
     }
     try {
-      const body = { description: costDraft.description.trim(), quantity: costDraft.quantity || null, unitCost: costDraft.unitCost || null, amount: costDraft.amount, sortOrder: costDraft.id ? (costLines.find((line) => line.id === costDraft.id)?.sortOrder ?? costLines.length) : costLines.length };
+      const nextSortOrder = costLines.reduce((highest, line) => Math.max(highest, line.sortOrder), -1) + 1;
+      const body = { description: costDraft.description.trim(), quantity: costDraft.quantity || null, unitCost: costDraft.unitCost || null, amount: costDraft.amount, sortOrder: costDraft.id ? (costLines.find((line) => line.id === costDraft.id)?.sortOrder ?? nextSortOrder) : nextSortOrder };
       const line = costDraft.id ? await updateCostLine(contract.id, costDraft.id, body) : await createCostLine(contract.id, body);
       setCostLines((current) => costDraft.id ? current.map((item) => item.id === line.id ? line : item) : [...current, line]);
       setCostDraft({ description: "", quantity: "", unitCost: "", amount: "" });
@@ -732,6 +763,35 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
       setCostLines((current) => current.filter((item) => item.id !== line.id));
     } catch (removeError) {
       toast.error(errorMessage(removeError, "Unable to remove cost line."));
+    }
+  }
+
+  async function importCostRows(file: File) {
+    if (!file.name.toLowerCase().endsWith(".xlsx")) {
+      toast.error("Import only supports .xlsx files. Download and use the provided template.");
+      return;
+    }
+
+    let form = contract;
+    if (!form?.id) {
+      try {
+        form = await persistMain();
+      } catch (saveError) {
+        toast.error(errorMessage(saveError, "Save the draft before importing cost rows."));
+        return;
+      }
+    }
+
+    if (!form?.id) return;
+    setImportingCostEstimate(true);
+    try {
+      const imported = await importCostEstimate(form.id, file);
+      setCostLines((current) => [...current, ...imported]);
+      toast.success(`${imported.length} cost row${imported.length === 1 ? "" : "s"} imported.`);
+    } catch (importError) {
+      toast.error(errorMessage(importError, "Unable to import the Excel cost estimate."));
+    } finally {
+      setImportingCostEstimate(false);
     }
   }
 
@@ -765,43 +825,74 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
     <Card className="order-1"><CardHeader><CardTitle>Project identification</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{input("title", "Project name / contractor / contract title")}{input("referenceNo", "Reference number")}</CardContent></Card>
     <Card className="order-2"><CardHeader><CardTitle>Project Description</CardTitle></CardHeader><CardContent><div className="space-y-2"><Label htmlFor="scope">Scope of work</Label><Textarea id="scope" value={values.scope} onChange={(event) => setValue("scope", event.target.value)} aria-invalid={Boolean(errors.scope)} />{errors.scope && <p className="text-sm text-destructive">{errors.scope}</p>}</div></CardContent></Card>
     <Card className="order-3"><CardHeader><CardTitle>Contract information</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{select("sponsorDepartmentId", "Sponsor department", refs?.departments ?? [], "Select department")}{select("contractCategoryId", "Contract category", refs?.categories ?? [], "Select category")}<div className="md:col-span-2 space-y-2"><Label htmlFor="procurementRationale">Sourcing / procurement rationale</Label><Textarea id="procurementRationale" value={values.procurementRationale} onChange={(event) => setValue("procurementRationale", event.target.value)} aria-invalid={Boolean(errors.procurementRationale)} />{errors.procurementRationale && <p className="text-sm text-destructive">{errors.procurementRationale}</p>}</div></CardContent></Card>
-    <Card className="order-5"><CardHeader><CardTitle>Financial and vendor information</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{input("contractAmount", "Estimated contract amount", "number")}{select("currencyId", "Currency", (refs?.currencies ?? []).map((item) => ({ id: item.id, name: `${item.code} - ${item.name}` })), "Select currency")}<div className="space-y-2"><Label htmlFor="recommendedBidderId">Recommended bidder</Label><select id="recommendedBidderId" className="h-9 w-full rounded-lg border bg-background px-2 text-sm" value={values.recommendedBidderId} onChange={(event) => { setValue("recommendedBidderId", event.target.value); setValue("recommendedVendorId", ""); }}><option value="">No recommendation</option>{bidders.map((bidder) => <option key={bidder.id} value={bidder.id}>{bidder.companyName || bidder.vendor?.name}</option>)}</select>{bidders.length === 0 && <p className="text-sm text-muted-foreground">Please add a bidder in Bidder Management before selecting a recommended bidder.</p>}</div><div className="space-y-2"><Label htmlFor="selectionRationale">Selection rationale</Label><Textarea id="selectionRationale" value={values.selectionRationale} onChange={(event) => setValue("selectionRationale", event.target.value)} aria-invalid={Boolean(errors.selectionRationale)} />{errors.selectionRationale && <p className="text-sm text-destructive">{errors.selectionRationale}</p>}</div></CardContent></Card>
+    <Card className="order-5"><CardHeader><CardTitle>Financial and vendor information</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{input("budgetProvision", "Budget provision (planned total)", "number")}{input("contractAmount", "Estimated contract amount", "number")}{select("currencyId", "Currency", (refs?.currencies ?? []).map((item) => ({ id: item.id, name: `${item.code} - ${item.name}` })), "Select currency")}<div className="space-y-2"><Label htmlFor="recommendedBidderId">Recommended bidder</Label><select id="recommendedBidderId" className="h-9 w-full rounded-lg border bg-background px-2 text-sm" value={values.recommendedBidderId} onChange={(event) => { setValue("recommendedBidderId", event.target.value); setValue("recommendedVendorId", ""); }}><option value="">No recommendation</option>{bidders.map((bidder) => <option key={bidder.id} value={bidder.id}>{bidder.companyName || bidder.vendor?.name}</option>)}</select>{bidders.length === 0 && <p className="text-sm text-muted-foreground">Please add a bidder in Bidder Management before selecting a recommended bidder.</p>}</div><div className="space-y-2"><Label htmlFor="selectionRationale">Selection rationale</Label><Textarea id="selectionRationale" value={values.selectionRationale} onChange={(event) => setValue("selectionRationale", event.target.value)} aria-invalid={Boolean(errors.selectionRationale)} />{errors.selectionRationale && <p className="text-sm text-destructive">{errors.selectionRationale}</p>}</div></CardContent></Card>
     <Card className="order-4">
       <CardHeader><CardTitle>Bidder Management</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-3">
           <div className="space-y-2">
             <Label htmlFor="company-selection">Company</Label>
-            <select
+            <Input
               id="company-selection"
-              className="h-10 w-full rounded-lg border bg-background px-3 text-sm"
-              value={companySelection}
+              list="company-options"
+              value={companyQuery}
+              placeholder="Type to search companies..."
+              autoComplete="off"
               onChange={(event) => {
-                const selection = event.target.value;
-                setCompanySelection(selection);
-                if (selection === "__new__") setNewVendor("");
-                else if (selection) {
-                  setNewVendor(selection);
+                const query = event.target.value;
+                setCompanyQuery(query);
+                if (query.trim().toLowerCase() === "new company") {
+                  setCompanySelection("__new__");
+                  setNewVendor("");
+                  setNewVendorTypeId(refs?.vendorTypes[0]?.id ?? "");
+                  setNewCompany(emptyCompanyDetails);
+                  return;
+                }
+                const match = (refs?.vendors ?? []).find(
+                  (vendor) => vendor.name.toLowerCase() === query.trim().toLowerCase(),
+                );
+                if (match) {
+                  setCompanySelection(match.id);
+                  setNewVendor(match.id);
                   setNewCompany(emptyCompanyDetails);
                 } else {
+                  setCompanySelection(query.trim() ? "" : "");
                   setNewVendor("");
+                  setNewCompany(emptyCompanyDetails);
                 }
               }}
-            >
-              <option value="">Select Company</option>
+            />
+            <datalist id="company-options">
               {(refs?.vendors ?? [])
                 .filter((vendor) => !bidders.some((bidder) => bidder.vendorId === vendor.id))
-                .map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
-              <option value="__new__">New Company</option>
-            </select>
+                .map((vendor) => <option key={vendor.id} value={vendor.name} />)}
+              <option value="New Company" />
+            </datalist>
           </div>
           {companySelection === "__new__" && (
-            <CompanyDetailsFields
-              value={newCompany}
-              onChange={setNewCompany}
-              idPrefix="new-company"
-              className="grid gap-3 rounded-lg border bg-muted/20 p-4 md:grid-cols-2"
-            />
+            <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
+              <CompanyDetailsFields
+                value={newCompany}
+                onChange={setNewCompany}
+                idPrefix="new-company"
+                className="grid gap-3 md:grid-cols-2"
+              />
+              <div className="space-y-2">
+                <Label htmlFor="new-company-vendor-type">Vendor type</Label>
+                <select
+                  id="new-company-vendor-type"
+                  className="h-10 w-full rounded-lg border bg-background px-3 text-sm"
+                  value={newVendorTypeId}
+                  onChange={(event) => setNewVendorTypeId(event.target.value)}
+                  required
+                >
+                  <option value="">Select vendor type</option>
+                  {(refs?.vendorTypes ?? []).map((vendorType) => (
+                    <option key={vendorType.id} value={vendorType.id}>{vendorType.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
           )}
           {companySelection && companySelection !== "__new__" && (() => {
             const company = refs?.vendors.find((vendor) => vendor.id === companySelection);
@@ -811,6 +902,7 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
               <div className="rounded-lg border bg-muted/20 p-4" aria-live="polite">
                 <p className="font-medium">{company.name}</p>
                 <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+                  <div><dt className="text-muted-foreground">Vendor Type</dt><dd>{company.vendorType?.name || "—"}</dd></div>
                   <div><dt className="text-muted-foreground">Contact Person</dt><dd>{details.contactPerson || "—"}</dd></div>
                   <div><dt className="text-muted-foreground">Email</dt><dd>{details.email || "—"}</dd></div>
                   <div><dt className="text-muted-foreground">Phone</dt><dd>{details.phone || "—"}</dd></div>
@@ -855,7 +947,75 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
     </Card>
     <Card className="order-7"><CardHeader><CardTitle>Supporting documents</CardTitle></CardHeader><CardContent className="space-y-4"><AttachmentUploader formId={activeContractId} limits={attachmentLimits} onUploaded={() => setAttachmentRefresh((value) => value + 1)} onUploadStateChange={setAttachmentsUploading} onPreDraftPendingChange={updatePreDraftUploadsPending} />{activeContractId && <AttachmentList formId={activeContractId} refreshKey={attachmentRefresh} />}</CardContent></Card>
     <Card className="order-8"><CardHeader><CardTitle>Approval Workflow</CardTitle></CardHeader><CardContent className="space-y-2"><p className="text-sm text-muted-foreground">Select the employees responsible for reviewing and approving this contract. Approvals will follow the sequence specified below.</p><Label htmlFor="contract-approver-search">Select an Approver</Label><ApproverSelect inputId="contract-approver-search" value={approverIds} onChange={setApproverIds} /></CardContent></Card>
-    <Card className="order-9"><CardHeader><CardTitle>Budget and cost information</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-muted-foreground">Tax is not configured; tax is 0.00.</p>{costLines.map((line) => <div key={line.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2 text-sm"><span>{line.description}: {line.quantity} × {line.unitCost} = {line.amount}</span><span><Button size="sm" variant="ghost" onClick={() => setCostDraft({ id: line.id, description: line.description, quantity: line.quantity ?? "", unitCost: line.unitCost ?? "", amount: line.amount })}>Edit</Button><Button size="sm" variant="ghost" className="text-destructive" onClick={() => void removeCostLine(line)}>Remove</Button></span></div>)}<div className="grid gap-2 md:grid-cols-4"><Input placeholder="Description" value={costDraft.description} onChange={(event) => setCostDraft({ ...costDraft, description: event.target.value })} /><Input placeholder="Quantity" min="0" type="number" value={costDraft.quantity} onChange={(event) => { const quantity = event.target.value; setCostDraft({ ...costDraft, quantity, amount: quantity && costDraft.unitCost ? calculatedAmount(quantity, costDraft.unitCost) : "" }); }} /><Input placeholder="Unit cost" min="0" type="number" value={costDraft.unitCost} onChange={(event) => { const unitCost = event.target.value; setCostDraft({ ...costDraft, unitCost, amount: costDraft.quantity && unitCost ? calculatedAmount(costDraft.quantity, unitCost) : "" }); }} /><div className="flex gap-2"><Input readOnly placeholder="Calculated amount" value={costDraft.amount} /><Button variant="outline" onClick={() => void saveCostLine()}><Plus /></Button></div></div><div className="flex justify-end gap-6 border-t pt-3 text-sm"><span>Subtotal: {costTotal(costLines)}</span><span>Tax: 0.0000</span><strong>Total: {costTotal(costLines)}</strong></div></CardContent></Card>
+    <Card className="order-9">
+      <CardHeader><CardTitle>Budget and cost information</CardTitle></CardHeader>
+      <CardContent className="space-y-3">
+        <div className="max-w-xs">{input("taxAmount", "Tax amount (manual entry)", "number")}</div>
+        <div className="space-y-2 rounded-md border p-3">
+          <p className="text-sm font-medium">Import cost rows from Excel</p>
+          <p className="text-xs text-muted-foreground">
+            Download the template, fill in Description, Quantity, and Unit Cost, then import it. Imported rows are added to existing rows.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy || importingCostEstimate}
+              onClick={() => void downloadCostEstimateTemplate().catch((downloadError) =>
+                toast.error(errorMessage(downloadError, "Unable to download the Excel template.")),
+              )}
+            >
+              <Download />Download Excel template
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy || importingCostEstimate}
+              onClick={() => costEstimateFileRef.current?.click()}
+            >
+              {importingCostEstimate ? <LoaderCircle className="animate-spin" /> : null}
+              {importingCostEstimate ? "Importing..." : "Import cost rows"}
+            </Button>
+            <input
+              ref={costEstimateFileRef}
+              type="file"
+              accept=".xlsx"
+              className="sr-only"
+              aria-label="Excel cost estimate file"
+              disabled={busy || importingCostEstimate}
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = "";
+                if (file) void importCostRows(file);
+              }}
+            />
+          </div>
+        </div>
+        {costLines.map((line) => (
+          <div key={line.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2 text-sm">
+            <span>{line.description}: {line.quantity} × {line.unitCost} = {line.amount}</span>
+            <span>
+              <Button size="sm" variant="ghost" onClick={() => setCostDraft({ id: line.id, description: line.description, quantity: line.quantity ?? "", unitCost: line.unitCost ?? "", amount: line.amount })}>Edit</Button>
+              <Button size="sm" variant="ghost" className="text-destructive" onClick={() => void removeCostLine(line)}>Remove</Button>
+            </span>
+          </div>
+        ))}
+        <div className="grid gap-2 md:grid-cols-4">
+          <Input placeholder="Description" value={costDraft.description} onChange={(event) => setCostDraft({ ...costDraft, description: event.target.value })} />
+          <Input placeholder="Quantity" min="0" type="number" value={costDraft.quantity} onChange={(event) => { const quantity = event.target.value; setCostDraft({ ...costDraft, quantity, amount: quantity && costDraft.unitCost ? calculatedAmount(quantity, costDraft.unitCost) : "" }); }} />
+          <Input placeholder="Unit cost" min="0" type="number" value={costDraft.unitCost} onChange={(event) => { const unitCost = event.target.value; setCostDraft({ ...costDraft, unitCost, amount: costDraft.quantity && unitCost ? calculatedAmount(costDraft.quantity, unitCost) : "" }); }} />
+          <div className="flex gap-2">
+            <Input readOnly placeholder="Calculated amount" value={costDraft.amount} />
+            <Button type="button" variant="outline" disabled={importingCostEstimate} onClick={() => void saveCostLine()}><Plus /></Button>
+          </div>
+        </div>
+        <div className="flex justify-end gap-6 border-t pt-3 text-sm">
+          <span>Subtotal: {costTotal(costLines)}</span>
+          <span>Tax amount: {sumMoney([values.taxAmount || "0"])}</span>
+          <strong>Total including tax: {totalWithTax(costLines, values.taxAmount)}</strong>
+        </div>
+      </CardContent>
+    </Card>
     <DynamicFormSections
       definition={formSchema?.definition}
       values={dynamicValues}

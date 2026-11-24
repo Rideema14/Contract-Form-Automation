@@ -20,6 +20,10 @@ Rules: use Decimal/Numeric for money (never floats); add constraints and indexes
 contract number, status, created date and common search filters. Agree relationships, required fields,
 delete rules and status enums first.
 
+`ContractForm.budgetProvision` records the planned total budget separately from the estimated contract
+amount. `ContractForm.taxAmount` stores an explicit tax amount in the contract currency; totals add it
+to the cost-line subtotal without assuming a tax rate. Existing contracts default to zero tax.
+
 ## Versioned Form Builder
 - `FormSchemaVersion` stores immutable published definitions with unique, increasing version numbers.
 - `FormSchemaDraft` stores the editable Admin draft separately from published definitions.

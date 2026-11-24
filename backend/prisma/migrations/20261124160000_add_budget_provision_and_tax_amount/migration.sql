@@ -1,0 +1,3 @@
+ALTER TABLE "ContractForm"
+ADD COLUMN "budgetProvision" DECIMAL(19,4),
+ADD COLUMN "taxAmount" DECIMAL(19,4) NOT NULL DEFAULT 0;

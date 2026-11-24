@@ -342,8 +342,9 @@ export default function ContractsPage() {
                     <TableHead>Amount</TableHead>
                     <TableHead>Department</TableHead>
                     <TableHead>Category</TableHead>
+                    <TableHead>Vendor</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Updated</TableHead>
+                    <TableHead>Submitted</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -375,6 +376,7 @@ export default function ContractsPage() {
                             contract.contractCategoryId ??
                             "—"}
                         </TableCell>
+                        <TableCell>{contract.recommendedVendor?.name ?? "—"}</TableCell>
                         <TableCell>
                           <Badge
                             variant={
@@ -388,7 +390,9 @@ export default function ContractsPage() {
                             {statusLabels[contract.status]}
                           </Badge>
                         </TableCell>
-                        <TableCell>{formatDate(contract.updatedAt)}</TableCell>
+                        <TableCell>
+                          {contract.submittedAt ? formatDate(contract.submittedAt) : "—"}
+                        </TableCell>
                         <TableCell>
                           <div className="flex justify-end gap-1">
                             <Link

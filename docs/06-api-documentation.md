@@ -57,6 +57,12 @@
 | GET | `/forms/:id/cost-estimate` | Get breakdown | U owner / AP / A |
 | PUT | `/forms/:id/cost-estimate` | Save breakdown lines | U owner |
 | POST | `/forms/:id/cost-estimate/excel` | Upload Excel estimate | U owner |
+| GET | `/forms/cost-estimate/template` | Download the standard `.xlsx` cost template | U |
+| POST | `/forms/:formId/cost-lines/import` | Validate and append cost rows from the standard template | U owner |
+
+The import template requires `Description`, `Quantity` and `Unit Cost` columns. Amounts are
+calculated by the server; imported rows append to existing rows. Imports accept `.xlsx` files up
+to 5 MiB and 500 non-empty rows. Invalid files are rejected without creating any rows.
 
 ## Approvals
 | Method | Endpoint | Description | Access |

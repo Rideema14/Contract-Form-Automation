@@ -20,7 +20,7 @@ The `POST /api/forms/:formId/final-pdf` endpoint lets an authorized Admin or ass
 | 4 | Procurement/Sourcing Rationale | `ContractForm.procurementRationale` |
 | 5 | Vendor/Contractor Details | `Vendor`, `VendorType`, `Bidder` |
 | 6 | Contract Amount and Currency | `ContractForm`, `Currency` |
-| 7 | Budget and Cost Estimate | `CostLine` |
+| 7 | Budget and Cost Estimate | `ContractForm.budgetProvision`, `CostLine`, `ContractForm.taxAmount` |
 | 8 | Bidders and Quotations | `Bidder`, `Quotation` |
 | 9 | Technical Evaluation | `Evaluation` (`TECHNICAL`) |
 | 10 | Commercial Evaluation | `Evaluation` (`COMMERCIAL`) |

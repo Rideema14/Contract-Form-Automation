@@ -16,7 +16,9 @@ export type Contract = {
   contractCategoryId: string | null;
   scope: string | null;
   procurementRationale: string | null;
+  budgetProvision: string | null;
   contractAmount: string | null;
+  taxAmount: string;
   currencyId: string | null;
   recommendedVendorId: string | null;
   recommendedBidderId: string | null;
@@ -48,7 +50,9 @@ export type ContractDraft = {
   contractCategoryId?: string | null;
   scope?: string | null;
   procurementRationale?: string | null;
+  budgetProvision?: string | null;
   contractAmount?: string | null;
+  taxAmount?: string | null;
   currencyId?: string | null;
   recommendedVendorId?: string | null;
   recommendedBidderId?: string | null;

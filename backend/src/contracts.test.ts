@@ -46,6 +46,8 @@ describe('contract request validation', () => {
     const result = contractDraftSchema.safeParse({
       title: 'Draft',
       contractAmount: '12500.2500',
+      budgetProvision: '15000.0000',
+      taxAmount: '125.2500',
     });
 
     expect(result.success).toBe(true);
@@ -54,6 +56,7 @@ describe('contract request validation', () => {
   it('rejects unknown mutation fields and invalid money', () => {
     expect(contractDraftSchema.safeParse({ status: 'APPROVED' }).success).toBe(false);
     expect(contractDraftSchema.safeParse({ contractAmount: '-1' }).success).toBe(false);
+    expect(contractDraftSchema.safeParse({ taxAmount: '-1' }).success).toBe(false);
   });
 
   it('applies list defaults and rejects invalid bidder ordering', () => {
@@ -387,11 +390,12 @@ describe('contract service authorization and persistence', () => {
     });
   });
 
-  it('calculates decimal-safe cost totals without a tax assumption', async () => {
+  it('includes the stored tax amount in decimal-safe cost totals', async () => {
     vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
       id: 'form-1',
       createdById: submitter.id,
       status: ContractStatus.DRAFT,
+      taxAmount: new Prisma.Decimal('0.35'),
     } as never);
 
     vi.spyOn(prisma.costLine, 'findMany').mockResolvedValue([
@@ -401,8 +405,8 @@ describe('contract service authorization and persistence', () => {
 
     await expect(getCostEstimate('form-1', submitter)).resolves.toMatchObject({
       subtotal: new Prisma.Decimal('0.30'),
-      tax: new Prisma.Decimal('0'),
-      total: new Prisma.Decimal('0.30'),
+      tax: new Prisma.Decimal('0.35'),
+      total: new Prisma.Decimal('0.65'),
     });
   });
 
@@ -422,6 +426,8 @@ describe('contract service authorization and persistence', () => {
     await createDraft(submitter, {
       title: 'Draft',
       contractAmount: '10.25',
+      budgetProvision: '12.50',
+      taxAmount: '0.25',
     });
 
     expect(create).toHaveBeenCalledWith(
@@ -431,6 +437,9 @@ describe('contract service authorization and persistence', () => {
           status: ContractStatus.DRAFT,
           formSchemaVersionId: 'schema-v2',
           dynamicValues: {},
+          budgetProvision: new Prisma.Decimal('12.50'),
+          contractAmount: new Prisma.Decimal('10.25'),
+          taxAmount: new Prisma.Decimal('0.25'),
         }),
       }),
     );
@@ -886,6 +895,7 @@ describe('contract submission', () => {
     scope: 'Scope',
     procurementRationale: 'Rationale',
     contractAmount: new Prisma.Decimal('30.00'),
+    taxAmount: new Prisma.Decimal('0'),
     recommendedVendorId: null,
     selectionRationale: null,
     bidders: [{
