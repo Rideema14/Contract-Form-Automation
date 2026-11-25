@@ -331,6 +331,7 @@ export async function createDraft(
           formSchemaVersionId: latestSchema.id,
           dynamicValues: normalizedValues as Prisma.InputJsonValue,
           contractAmount: decimal(input.contractAmount),
+          budgetProvision: decimal(input.budgetProvision),
           createdById: user.id,
           status: ContractStatus.DRAFT,
         },
@@ -396,6 +397,12 @@ export async function listContracts(
       ? {
           OR: [
             {
+              id: {
+                contains: query.q,
+                mode: 'insensitive',
+              },
+            },
+            {
               title: {
                 contains: query.q,
                 mode: 'insensitive',
@@ -407,12 +414,22 @@ export async function listContracts(
                 mode: 'insensitive',
               },
             },
+            {
+              recommendedVendor: {
+                is: {
+                  name: {
+                    contains: query.q,
+                    mode: 'insensitive',
+                  },
+                },
+              },
+            },
           ],
         }
       : {}),
     ...(query.from || query.to
       ? {
-          createdAt: {
+          submittedAt: {
             ...(query.from ? { gte: query.from } : {}),
             ...(query.to ? { lte: query.to } : {}),
           },
@@ -433,6 +450,18 @@ export async function listContracts(
         recommendedVendor: {
           include: {
             vendorType: true,
+          },
+        },
+        attachments: {
+          where: {
+            category: 'GENERATED_PDF',
+            mimeType: 'application/pdf',
+          },
+          select: {
+            id: true,
+            category: true,
+            fileName: true,
+            mimeType: true,
           },
         },
       },
@@ -478,6 +507,7 @@ export async function getContract(formId: string, user: AuthUser) {
       },
       recommendedBidder: {
         include: {
+          vendorType: true,
           vendor: {
             include: {
               vendorType: true,
@@ -488,6 +518,7 @@ export async function getContract(formId: string, user: AuthUser) {
       bidders: {
         orderBy: { sortOrder: 'asc' },
         include: {
+          vendorType: true,
           vendor: {
             include: {
               vendorType: true,
@@ -656,6 +687,9 @@ export async function updateContract(
         ...(normalizedDynamicValues !== undefined ? { dynamicValues: normalizedDynamicValues } : {}),
         ...(Object.prototype.hasOwnProperty.call(input, 'contractAmount')
           ? { contractAmount: decimal(input.contractAmount) }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(input, 'budgetProvision')
+          ? { budgetProvision: decimal(input.budgetProvision) }
           : {}),
       },
     });
@@ -842,6 +876,10 @@ async function validateSubmission(formId: string) {
     include: {
       bidders: {
         include: {
+          vendorType: true,
+          vendor: {
+            include: { vendorType: true },
+          },
           quotations: true,
         },
       },
@@ -864,6 +902,9 @@ async function validateSubmission(formId: string) {
     ['scope', form.scope],
     ['procurementRationale', form.procurementRationale],
     ['contractAmount', form.contractAmount],
+    ['budgetProvision', form.budgetProvision],
+    ['currencyId', form.currencyId],
+    ['recommendedBidderId', form.recommendedBidderId ?? form.recommendedVendorId],
   ];
 
   const missing = requiredFields
@@ -899,6 +940,33 @@ async function validateSubmission(formId: string) {
     requiredDecimal(form.contractAmount, 'contractAmount'),
     'contractAmount'
   );
+
+  assertNonNegative(
+    requiredDecimal(form.budgetProvision, 'budgetProvision'),
+    'budgetProvision'
+  );
+
+  const contractingBidder = form.bidders.find(
+    (bidder) => bidder.id === form.recommendedBidderId,
+  ) ?? form.bidders.find(
+    (bidder) => bidder.vendorId === form.recommendedVendorId,
+  );
+  if (!contractingBidder) {
+    throw new AppError(
+      400,
+      'VALIDATION_ERROR',
+      'The contracting vendor must be a bidder on this contract',
+      [{ path: 'recommendedBidderId', message: 'Select a bidder as the contracting vendor' }],
+    );
+  }
+  if (!contractingBidder.vendorType && !contractingBidder.vendor?.vendorType) {
+    throw new AppError(
+      400,
+      'VALIDATION_ERROR',
+      'Vendor type is required for the contracting vendor',
+      [{ path: 'recommendedBidderId', message: 'Select a contracting vendor with a vendor type' }],
+    );
+  }
 
   if (
     (form.recommendedVendorId || form.recommendedBidderId) &&
@@ -1072,7 +1140,8 @@ export async function listBidders(
     where: { contractFormId: formId },
     orderBy: { sortOrder: 'asc' },
     include: {
-      vendor: true,
+      vendorType: true,
+      vendor: { include: { vendorType: true } },
       quotations: true,
     },
   });
@@ -1083,6 +1152,7 @@ export async function createBidder(
   user: AuthUser,
   input: {
     vendorId?: string | null;
+    vendorTypeId?: string | null;
     companyName?: string;
     contactPerson?: string | null;
     email?: string | null;
@@ -1101,6 +1171,20 @@ export async function createBidder(
 
   if (input.vendorId && !vendor) {
     throw new AppError(404, 'VENDOR_NOT_FOUND', 'Vendor not found');
+  }
+
+  const vendorTypeId = input.vendorTypeId?.trim() || null;
+  if (vendor) {
+    if (vendorTypeId && vendorTypeId !== vendor.vendorTypeId) {
+      throw new AppError(400, 'VENDOR_TYPE_MISMATCH', 'Vendor type is managed by the registered vendor record');
+    }
+  } else {
+    if (!vendorTypeId) {
+      throw new AppError(400, 'VALIDATION_ERROR', 'Vendor type is required for a new company');
+    }
+    if (!await prisma.vendorType.findUnique({ where: { id: vendorTypeId } })) {
+      throw new AppError(404, 'VENDOR_TYPE_NOT_FOUND', 'Vendor type not found');
+    }
   }
 
   const companyName = input.companyName?.trim() || vendor?.name;
@@ -1148,12 +1232,14 @@ export async function createBidder(
     return tx.bidder.create({
       data: {
         ...input,
+        vendorTypeId: vendor ? null : vendorTypeId,
         sortOrder,
         companyName,
         contractFormId: formId,
       },
       include: {
-        vendor: true,
+        vendorType: true,
+        vendor: { include: { vendorType: true } },
         quotations: true,
       },
     });
@@ -1166,6 +1252,7 @@ export async function updateBidder(
   user: AuthUser,
   input: Partial<{
     vendorId: string | null;
+    vendorTypeId: string | null;
     companyName: string;
     contactPerson: string | null;
     email: string | null;
@@ -1187,6 +1274,12 @@ export async function updateBidder(
     throw new AppError(404, 'BIDDER_NOT_FOUND', 'Bidder not found');
   }
 
+  if (input.vendorId === null && bidder.vendorId && !input.vendorTypeId) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Vendor type is required when changing to a new company');
+  }
+
+  let registeredVendor: Awaited<ReturnType<typeof prisma.vendor.findUnique>> = null;
+
   if (input.vendorId && input.vendorId !== bidder.vendorId) {
     if (
       form.recommendedVendorId === bidder.vendorId ||
@@ -1199,12 +1292,31 @@ export async function updateBidder(
       );
     }
 
-    const vendor = await prisma.vendor.findUnique({
+    registeredVendor = await prisma.vendor.findUnique({
       where: { id: input.vendorId },
     });
 
-    if (!vendor) {
+    if (!registeredVendor) {
       throw new AppError(404, 'VENDOR_NOT_FOUND', 'Vendor not found');
+    }
+  } else if (bidder.vendorId) {
+    registeredVendor = await prisma.vendor.findUnique({
+      where: { id: bidder.vendorId },
+    });
+  }
+
+  let vendorTypeId = input.vendorTypeId;
+  if (input.vendorId !== undefined && input.vendorId !== null) {
+    if (vendorTypeId && vendorTypeId !== registeredVendor?.vendorTypeId) {
+      throw new AppError(400, 'VENDOR_TYPE_MISMATCH', 'Vendor type is managed by the registered vendor record');
+    }
+    vendorTypeId = null;
+  } else if (input.vendorTypeId !== undefined) {
+    if (input.vendorId === undefined && bidder.vendorId) {
+      throw new AppError(400, 'VENDOR_TYPE_MISMATCH', 'Vendor type is managed by the registered vendor record');
+    }
+    if (input.vendorTypeId && !await prisma.vendorType.findUnique({ where: { id: input.vendorTypeId } })) {
+      throw new AppError(404, 'VENDOR_TYPE_NOT_FOUND', 'Vendor type not found');
     }
   }
 
@@ -1247,10 +1359,12 @@ export async function updateBidder(
       where: { id: bidderId },
       data: {
         ...input,
+        ...(vendorTypeId !== undefined ? { vendorTypeId } : {}),
         ...(companyName ? { companyName } : {}),
       },
       include: {
-        vendor: true,
+        vendorType: true,
+        vendor: { include: { vendorType: true } },
         quotations: true,
       },
     })

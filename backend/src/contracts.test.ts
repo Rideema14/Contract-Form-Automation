@@ -10,6 +10,7 @@ import {
 } from './schemas/contract.schema';
 import {
   createDraft,
+  createBidder,
   getCostEstimate,
   getContract,
   listContracts,
@@ -47,6 +48,7 @@ describe('contract request validation', () => {
     const result = contractDraftSchema.safeParse({
       title: 'Draft',
       contractAmount: '12500.2500',
+      budgetProvision: '14000.0000',
     });
 
     expect(result.success).toBe(true);
@@ -55,6 +57,7 @@ describe('contract request validation', () => {
   it('rejects unknown mutation fields and invalid money', () => {
     expect(contractDraftSchema.safeParse({ status: 'APPROVED' }).success).toBe(false);
     expect(contractDraftSchema.safeParse({ contractAmount: '-1' }).success).toBe(false);
+    expect(contractDraftSchema.safeParse({ budgetProvision: '-1' }).success).toBe(false);
   });
 
   it('applies list defaults and rejects invalid bidder ordering', () => {
@@ -505,6 +508,7 @@ describe('contract service authorization and persistence', () => {
     await createDraft(submitter, {
       title: 'Draft',
       contractAmount: '10.25',
+      budgetProvision: '15.50',
     });
 
     expect(create).toHaveBeenCalledWith(
@@ -514,10 +518,54 @@ describe('contract service authorization and persistence', () => {
           status: ContractStatus.DRAFT,
           formSchemaVersionId: 'schema-v2',
           dynamicValues: {},
+          contractAmount: new Prisma.Decimal('10.25'),
+          budgetProvision: new Prisma.Decimal('15.50'),
           referenceNo: `CF-${year}-0004`,
         }),
       }),
     );
+  });
+
+  it('stores the reference type on a new contract-only company bidder', async () => {
+    const vendorTypeId = '550e8400-e29b-41d4-a716-446655440003';
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: submitter.id,
+      status: ContractStatus.DRAFT,
+    } as never);
+    vi.spyOn(prisma.bidder, 'findFirst').mockResolvedValue(null);
+    vi.spyOn(prisma.vendorType, 'findUnique').mockResolvedValue({
+      id: vendorTypeId,
+      name: 'Consultant',
+    } as never);
+    const create = vi.fn().mockResolvedValue({ id: 'bidder-1' });
+    const tx = {
+      bidder: {
+        aggregate: vi.fn().mockResolvedValue({ _max: { sortOrder: null } }),
+        create,
+      },
+    };
+    vi.spyOn(prisma, '$transaction').mockImplementation(
+      async (callback) => callback(tx as never) as never,
+    );
+
+    await createBidder('form-1', submitter, {
+      companyName: 'New Consulting Co.',
+      vendorId: null,
+      vendorTypeId,
+    });
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        companyName: 'New Consulting Co.',
+        vendorId: null,
+        vendorTypeId,
+      }),
+      include: expect.objectContaining({
+        vendorType: true,
+        vendor: { include: { vendorType: true } },
+      }),
+    }));
   });
 
   it('rejects a stale published version when creating a contract', async () => {
@@ -559,6 +607,52 @@ describe('contract service authorization and persistence', () => {
     );
 
     expect(count).toHaveBeenCalled();
+  });
+
+  it('combines register search, department, status, and submitted-date filters', async () => {
+    const findMany = vi.spyOn(prisma.contractForm, 'findMany')
+      .mockResolvedValue([] as never);
+
+    vi.spyOn(prisma.contractForm, 'count').mockResolvedValue(0);
+    vi.spyOn(prisma, '$transaction').mockResolvedValue([[], 0] as never);
+
+    const from = new Date('2026-03-01T00:00:00.000Z');
+    const to = new Date('2026-03-31T23:59:59.999Z');
+    await listContracts(admin, {
+      page: 1,
+      pageSize: 6,
+      status: ContractStatus.APPROVED,
+      departmentId: 'department-1',
+      from,
+      to,
+      q: 'Acme',
+    });
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          status: ContractStatus.APPROVED,
+          sponsorDepartmentId: 'department-1',
+          submittedAt: { gte: from, lte: to },
+          OR: [
+            { id: { contains: 'Acme', mode: 'insensitive' } },
+            { title: { contains: 'Acme', mode: 'insensitive' } },
+            { referenceNo: { contains: 'Acme', mode: 'insensitive' } },
+            {
+              recommendedVendor: {
+                is: { name: { contains: 'Acme', mode: 'insensitive' } },
+              },
+            },
+          ],
+        },
+        include: expect.objectContaining({
+          attachments: {
+            where: { category: 'GENERATED_PDF', mimeType: 'application/pdf' },
+            select: { id: true, category: true, fileName: true, mimeType: true },
+          },
+        }),
+      }),
+    );
   });
 
   it('lists assigned contracts for approvers', async () => {
@@ -1042,10 +1136,17 @@ describe('contract submission', () => {
     scope: 'Scope',
     procurementRationale: 'Rationale',
     contractAmount: new Prisma.Decimal('30.00'),
+    budgetProvision: new Prisma.Decimal('45.00'),
+    currencyId: 'currency-1',
     recommendedVendorId: null,
-    selectionRationale: null,
+    recommendedBidderId: 'bidder-1',
+    selectionRationale: 'Selected after evaluation',
     bidders: [{
       id: 'bidder-1',
+      vendorId: null,
+      vendorTypeId: 'vendor-type-1',
+      vendorType: { id: 'vendor-type-1', name: 'Consultant' },
+      vendor: null,
       quotations: [{ quotedAmount: new Prisma.Decimal('30.00') }],
     }],
     evaluations: [
@@ -1059,6 +1160,56 @@ describe('contract submission', () => {
       unitCost: new Prisma.Decimal('15.00'),
     }],
   };
+
+  it.each([
+    ['budgetProvision', null, 'budgetProvision'],
+    ['currencyId', null, 'currencyId'],
+    ['recommendedBidderId', null, 'recommendedBidderId'],
+  ])('requires %s when submitting', async (field, value, errorPath) => {
+    vi.spyOn(prisma.contractForm, 'findUnique')
+      .mockResolvedValueOnce({
+        id: formId,
+        createdById: submitter.id,
+        status: ContractStatus.DRAFT,
+      } as never)
+      .mockResolvedValueOnce({
+        ...completeForm,
+        [field]: value,
+      } as never);
+
+    await expect(
+      submitContract(formId, submitter, [approverId]),
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      code: 'VALIDATION_ERROR',
+      details: expect.arrayContaining([expect.objectContaining({ path: errorPath })]),
+    });
+  });
+
+  it('requires a vendor type for the selected contracting bidder', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique')
+      .mockResolvedValueOnce({
+        id: formId,
+        createdById: submitter.id,
+        status: ContractStatus.DRAFT,
+      } as never)
+      .mockResolvedValueOnce({
+        ...completeForm,
+        bidders: [{
+          ...completeForm.bidders[0],
+          vendorTypeId: null,
+          vendorType: null,
+        }],
+      } as never);
+
+    await expect(
+      submitContract(formId, submitter, [approverId]),
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      code: 'VALIDATION_ERROR',
+      details: expect.arrayContaining([expect.objectContaining({ path: 'recommendedBidderId' })]),
+    });
+  });
 
 it('submits a draft contract successfully', async () => {
   vi.spyOn(prisma.contractForm, 'findUnique')

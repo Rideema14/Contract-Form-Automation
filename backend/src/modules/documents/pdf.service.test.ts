@@ -13,6 +13,7 @@ const source: FinalPdfSource = {
     procurementRationale: 'Replace old chairs',
     selectionRationale: 'Lowest compliant bid',
     contractAmount: d('1200.5000'),
+    budgetProvision: d('1500.0000'),
     submittedAt: new Date('2026-11-01T10:00:00Z'),
     createdAt: new Date('2026-10-25T10:00:00Z'),
     updatedAt: new Date('2026-11-05T09:30:00Z'),
@@ -25,7 +26,7 @@ const source: FinalPdfSource = {
     bidders: [
       {
         companyName: 'Acme Ltd', contactPerson: 'A. Person', email: 'a@acme.test', phone: null,
-        qualifications: 'ISO 9001', vendor: { name: 'Acme Ltd' },
+        qualifications: 'ISO 9001', vendorType: { name: 'Technology Services' }, vendor: { name: 'Acme Ltd' },
         quotations: [{ quotedAmount: d('1200.5000'), currency: { code: 'USD' }, quotationDate: new Date('2026-10-20'), notes: null }],
       },
     ],
@@ -70,7 +71,7 @@ describe('final contract PDF', () => {
       ...source,
       form: {
         ...source.form, referenceNo: null, title: null, scope: null, procurementRationale: null,
-        selectionRationale: null, contractAmount: null, submittedAt: null, createdBy: null,
+        selectionRationale: null, contractAmount: null, budgetProvision: null, submittedAt: null, createdBy: null,
         sponsorDepartment: null, contractCategory: null, currency: null, recommendedVendor: null,
         recommendedBidder: null, bidders: [], evaluations: [], costLines: [],
       },
@@ -92,7 +93,7 @@ describe('final contract PDF', () => {
       '1. Contract / Project Identification',
       '2. Sponsor Department',
       '3. Contract Category and Scope',
-      '4. Procurement / Sourcing Rationale',
+      '4. Business Justification / Procurement Rationale',
       '5. Vendor / Contractor Details',
       '6. Contract Amount and Currency',
       '7. Budget and Cost Estimate',
@@ -109,6 +110,9 @@ describe('final contract PDF', () => {
     expect(json).toContain('quotation.pdf');
     expect(json).toContain('CONTRACT_FINAL_APPROVED');
     expect(json).toContain('Competitive price');
+    expect(json).toContain('Budget provision');
+    expect(json).toContain('1500.00 USD');
+    expect(json).toContain('Technology Services');
   });
 
   it('renders saved dynamic section labels and values from the pinned form version', () => {

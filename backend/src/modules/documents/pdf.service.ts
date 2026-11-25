@@ -21,6 +21,7 @@ export interface FinalPdfSource {
     procurementRationale: string | null;
     selectionRationale: string | null;
     contractAmount: Dec | null;
+    budgetProvision: Dec | null;
     submittedAt: Date | null;
     createdAt: Date;
     updatedAt: Date;
@@ -32,7 +33,11 @@ export interface FinalPdfSource {
       name: string;
       vendorType?: { name: string } | null;
     } | null;
-    recommendedBidder?: { companyName: string } | null;
+    recommendedBidder?: {
+      companyName: string;
+      vendorType?: { name: string } | null;
+      vendor?: { name: string; vendorType?: { name: string } | null } | null;
+    } | null;
     bidders: Array<{
       companyName: string;
       contactPerson: string | null;
@@ -43,6 +48,7 @@ export interface FinalPdfSource {
         name: string;
         vendorType?: { name: string } | null;
       } | null;
+      vendorType?: { name: string } | null;
       quotations: Array<{
         quotedAmount: Dec;
         currency?: { code: string } | null;
@@ -184,12 +190,12 @@ export function buildDocDefinition(src: FinalPdfSource): TDocumentDefinitions {
         ['Field', 'Value'],
         [
           ['Contract category', text(form.contractCategory?.name)],
-          ['Scope of work', text(form.scope)],
+          ['Contract Description / Scope of Work', text(form.scope)],
         ],
         ['35%', '*'],
       ),
 
-      heading('4. Procurement / Sourcing Rationale'),
+      heading('4. Business Justification / Procurement Rationale'),
       { text: text(form.procurementRationale), margin: [0, 0, 0, 4] },
 
       heading('5. Vendor / Contractor Details'),
@@ -197,7 +203,7 @@ export function buildDocDefinition(src: FinalPdfSource): TDocumentDefinitions {
         ['Vendor / contractor', 'Vendor type', 'Contact person', 'Email', 'Phone'],
         form.bidders.map((bidder) => [
           text(bidder.vendor?.name ?? bidder.companyName),
-          text(bidder.vendor?.vendorType?.name),
+          text(bidder.vendorType?.name ?? bidder.vendor?.vendorType?.name),
           text(bidder.contactPerson),
           text(bidder.email),
           text(bidder.phone),
@@ -208,7 +214,10 @@ export function buildDocDefinition(src: FinalPdfSource): TDocumentDefinitions {
       heading('6. Contract Amount and Currency'),
       table(
         ['Field', 'Value'],
-        [['Contract amount', `${money(form.contractAmount)} ${currency}`.trim()]],
+        [
+          ['Contract amount', `${money(form.contractAmount)} ${currency}`.trim()],
+          ['Budget provision', `${money(form.budgetProvision)} ${currency}`.trim()],
+        ],
         ['35%', '*'],
       ),
 
@@ -272,8 +281,8 @@ export function buildDocDefinition(src: FinalPdfSource): TDocumentDefinitions {
       table(
         ['Field', 'Value'],
         [
-          ['Recommended vendor', text(form.recommendedVendor?.name)],
-          ['Recommended bidder', text(form.recommendedBidder?.companyName)],
+          ['Recommended vendor', text(form.recommendedBidder?.companyName ?? form.recommendedBidder?.vendor?.name ?? form.recommendedVendor?.name)],
+          ['Vendor type', text(form.recommendedBidder?.vendorType?.name ?? form.recommendedBidder?.vendor?.vendorType?.name ?? form.recommendedVendor?.vendorType?.name)],
           ['Selection rationale', text(form.selectionRationale)],
         ],
         ['35%', '*'],

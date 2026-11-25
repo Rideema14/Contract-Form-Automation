@@ -17,6 +17,7 @@ export type Contract = {
   scope: string | null;
   procurementRationale: string | null;
   contractAmount: string | null;
+  budgetProvision: string | null;
   currencyId: string | null;
   recommendedVendorId: string | null;
   recommendedBidderId: string | null;
@@ -49,6 +50,7 @@ export type ContractDraft = {
   scope?: string | null;
   procurementRationale?: string | null;
   contractAmount?: string | null;
+  budgetProvision?: string | null;
   currencyId?: string | null;
   recommendedVendorId?: string | null;
   recommendedBidderId?: string | null;
@@ -108,13 +110,14 @@ export type FormSchemaVersion = {
 export type Vendor = {
   id: string;
   name: string;
-  vendorType?: { id: string; name: string };
+  vendorType?: { id: string; name: string } | null;
   contactDetails?: Record<string, unknown> | null;
 };
 
 export type Bidder = {
   id: string;
   vendorId: string | null;
+  vendorTypeId: string | null;
   sortOrder: number;
   companyName: string;
   contactPerson: string | null;
@@ -122,6 +125,7 @@ export type Bidder = {
   phone: string | null;
   qualifications: string | null;
   vendor: Vendor | null;
+  vendorType: { id: string; name: string } | null;
   quotations: Quotation[];
 };
 

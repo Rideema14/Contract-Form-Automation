@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   ChevronLeft,
   ChevronRight,
   Eye,
+  FileDown,
   LogOut,
   Pencil,
   Plus,
@@ -57,7 +58,8 @@ import {
 import { ApiError } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
 import { logout } from "@/services/auth";
-import { deleteContract, listContracts } from "@/services/contracts";
+import { deleteContract, getReferenceData, listContracts } from "@/services/contracts";
+import { downloadAttachment } from "@/features/attachments/attachments-api";
 import type {
   Contract,
   ContractStatus,
@@ -65,6 +67,14 @@ import type {
 } from "@/types/contracts";
 
 const PAGE_SIZE = 10;
+const INITIAL_PAGINATION: PaginationMetadata = {
+  page: 1,
+  pageSize: PAGE_SIZE,
+  totalItems: 0,
+  totalPages: 0,
+};
+
+type DepartmentOption = { id: string; name: string };
 
 const statusLabels: Record<ContractStatus, string> = {
   DRAFT: "Draft",
@@ -85,6 +95,24 @@ function formatDate(value: string): string {
   }).format(new Date(value));
 }
 
+function formatSubmissionDate(value: string | null): string {
+  return value ? formatDate(value) : "—";
+}
+
+function dateBound(value: string, endOfDay = false): string | undefined {
+  if (!value) return undefined;
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(
+    year,
+    month - 1,
+    day,
+    endOfDay ? 23 : 0,
+    endOfDay ? 59 : 0,
+    endOfDay ? 59 : 0,
+    endOfDay ? 999 : 0,
+  ).toISOString();
+}
+
 function getErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
     return error.message;
@@ -92,19 +120,63 @@ function getErrorMessage(error: unknown): string {
   return "Could not load contracts. Please try again.";
 }
 
+function normalizeDepartments(value: unknown): DepartmentOption[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((entry): DepartmentOption[] => {
+    if (typeof entry === "string") {
+      const id = entry.trim();
+      return id ? [{ id, name: id }] : [];
+    }
+    if (typeof entry !== "object" || entry === null) return [];
+
+    const department = entry as {
+      id?: unknown;
+      departmentId?: unknown;
+      name?: unknown;
+      departmentName?: unknown;
+    };
+    const id =
+      typeof department.id === "string"
+        ? department.id
+        : typeof department.departmentId === "string"
+          ? department.departmentId
+          : "";
+    if (!id) return [];
+
+    const name =
+      typeof department.name === "string"
+        ? department.name
+        : typeof department.departmentName === "string"
+          ? department.departmentName
+          : id;
+    return [{ id, name }];
+  });
+}
+
+function getDepartmentId(value: unknown): string {
+  if (typeof value === "string") return value || "ALL";
+  if (typeof value !== "object" || value === null) return "ALL";
+
+  const department = value as { id?: unknown; departmentId?: unknown };
+  if (typeof department.id === "string") return department.id;
+  if (typeof department.departmentId === "string") return department.departmentId;
+  return "ALL";
+}
+
 export default function ContractsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { authUser } = useAuth();
   const [contracts, setContracts] = useState<Contract[]>([]);
-  const [pagination, setPagination] = useState<PaginationMetadata>({
-    page: 1,
-    pageSize: PAGE_SIZE,
-    totalItems: 0,
-    totalPages: 0,
-  });
+  const [pagination, setPagination] = useState<PaginationMetadata>(INITIAL_PAGINATION);
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
+  const [departments, setDepartments] = useState<DepartmentOption[]>([]);
+  const [departmentError, setDepartmentError] = useState("");
+  const [departmentId, setDepartmentId] = useState("ALL");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const requestedStatus = searchParams.get("status");
   const initialStatus =
     requestedStatus && ["DRAFT", "PENDING_APPROVAL", "RETURNED", "APPROVED", "REJECTED"].includes(requestedStatus)
@@ -112,6 +184,7 @@ export default function ContractsPage() {
       : "ALL";
   const [status, setStatus] = useState<ContractStatus | "ALL">(initialStatus);
   const [page, setPage] = useState(1);
+  const [reloadVersion, setReloadVersion] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Contract | null>(null);
@@ -119,11 +192,21 @@ export default function ContractsPage() {
   const [deletionConfirmed, setDeletionConfirmed] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [downloadingPdfId, setDownloadingPdfId] = useState<string | null>(null);
   const isAdmin = authUser?.role === "ADMIN";
+  const contractsRequestVersion = useRef(0);
 
   const loadContracts = useCallback(async () => {
+    const requestVersion = ++contractsRequestVersion.current;
     setIsLoading(true);
     setError("");
+
+    if (from && to && from > to) {
+      setContracts([]);
+      setError("The end date must be on or after the start date.");
+      if (requestVersion === contractsRequestVersion.current) setIsLoading(false);
+      return;
+    }
 
     try {
       const result = await listContracts({
@@ -131,23 +214,50 @@ export default function ContractsPage() {
         pageSize: PAGE_SIZE,
         q: query || undefined,
         status: status === "ALL" ? undefined : status,
+        departmentId: departmentId === "ALL" ? undefined : departmentId,
+        from: dateBound(from),
+        to: dateBound(to, true),
       });
-      setContracts(result.items);
-      setPagination(
-        result.pagination ?? {
-          page,
-          pageSize: PAGE_SIZE,
-          totalItems: result.items.length,
-          totalPages: result.items.length === PAGE_SIZE ? page + 1 : page,
-        },
-      );
+      if (requestVersion === contractsRequestVersion.current) {
+        setContracts(result.items);
+        setPagination(
+          result.pagination ?? {
+            page,
+            pageSize: PAGE_SIZE,
+            totalItems: result.items.length,
+            totalPages: result.items.length === PAGE_SIZE ? page + 1 : page,
+          },
+        );
+      }
     } catch (loadError) {
-      setContracts([]);
-      setError(getErrorMessage(loadError));
+      if (requestVersion === contractsRequestVersion.current) {
+        setContracts([]);
+        setError(getErrorMessage(loadError));
+      }
     } finally {
-      setIsLoading(false);
+      if (requestVersion === contractsRequestVersion.current) setIsLoading(false);
     }
-  }, [page, query, status]);
+  }, [departmentId, from, page, query, status, to]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getReferenceData()
+      .then((result) => {
+        if (!cancelled) setDepartments(normalizeDepartments(result.departments));
+      })
+      .catch((loadError: unknown) => {
+        if (!cancelled) {
+          setDepartmentError(
+            loadError instanceof ApiError
+              ? loadError.message
+              : "Could not load departments.",
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -155,7 +265,7 @@ export default function ContractsPage() {
     }, 0);
 
     return () => window.clearTimeout(timeoutId);
-  }, [loadContracts]);
+  }, [loadContracts, reloadVersion]);
 
   function submitSearch(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -166,6 +276,45 @@ export default function ContractsPage() {
   function changeStatus(value: string | null) {
     setStatus((value ?? "ALL") as ContractStatus | "ALL");
     setPage(1);
+  }
+
+  function refreshContracts() {
+    contractsRequestVersion.current += 1;
+    setSearch("");
+    setQuery("");
+    setStatus("ALL");
+    setDepartmentId("ALL");
+    setFrom("");
+    setTo("");
+    setPage(1);
+    setPagination(INITIAL_PAGINATION);
+    setContracts([]);
+    setError("");
+    setIsLoading(true);
+    setReloadVersion((version) => version + 1);
+  }
+
+  async function downloadPdf(contract: Contract) {
+    const pdf = contract.attachments?.find(
+      (attachment) =>
+        attachment.category === "GENERATED_PDF" &&
+        attachment.mimeType === "application/pdf",
+    );
+    if (!pdf) return;
+
+    setDownloadingPdfId(contract.id);
+    try {
+      await downloadAttachment(contract.id, pdf);
+      toast.success("PDF downloaded.");
+    } catch (downloadError) {
+      toast.error(
+        downloadError instanceof ApiError
+          ? downloadError.message
+          : "Could not download the PDF.",
+      );
+    } finally {
+      setDownloadingPdfId(null);
+    }
   }
 
   async function confirmDelete() {
@@ -256,12 +405,12 @@ export default function ContractsPage() {
           <CardHeader>
             <CardTitle>Contract register</CardTitle>
             <CardDescription>
-              Search your forms and filter them by workflow status.
+              Search by title, vendor, or reference and filter by status, department, and submission date.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <form
-              className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_13rem_auto_auto] sm:items-end"
+              className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_12rem_14rem_10rem_10rem_auto_auto] xl:items-end"
               onSubmit={submitSearch}
             >
               <div className="flex min-w-0 flex-col gap-2">
@@ -271,7 +420,7 @@ export default function ContractsPage() {
                   <Input
                     id="contract-search"
                     className="h-10 pl-8"
-                    placeholder="Title or reference number"
+                    placeholder="Title, vendor, Form ID or reference"
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
                   />
@@ -293,6 +442,68 @@ export default function ContractsPage() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="flex min-w-0 flex-col gap-2">
+                <Label htmlFor="contract-department">Department</Label>
+                <Select
+                  value={departmentId}
+                  onValueChange={(value) => {
+                    setDepartmentId(getDepartmentId(value));
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger
+                    id="contract-department"
+                    className="h-10 w-full min-w-0"
+                    title={departmentId === "ALL"
+                      ? "All departments"
+                      : departments.find((department) => department.id === departmentId)?.name ?? "Department"}
+                  >
+                    <SelectValue className="min-w-0 flex-1 truncate text-left">
+                      {departmentId === "ALL"
+                        ? "All departments"
+                        : departments.find((department) => department.id === departmentId)?.name ?? "Select department"}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent className="max-w-[calc(100vw-2rem)]">
+                    <SelectItem value="ALL">All departments</SelectItem>
+                    {departments.map((department) => (
+                      <SelectItem
+                        key={department.id}
+                        value={department.id}
+                        className="min-w-0 max-w-[calc(100vw-3rem)]"
+                      >
+                        <span className="block min-w-0 truncate">{department.name}</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex min-w-0 flex-col gap-2">
+                <Label htmlFor="contract-submitted-from">Submitted from</Label>
+                <Input
+                  id="contract-submitted-from"
+                  className="h-10"
+                  type="date"
+                  value={from}
+                  onChange={(event) => {
+                    setFrom(event.target.value);
+                    setPage(1);
+                  }}
+                />
+              </div>
+              <div className="flex min-w-0 flex-col gap-2">
+                <Label htmlFor="contract-submitted-to">Submitted to</Label>
+                <Input
+                  id="contract-submitted-to"
+                  className="h-10"
+                  type="date"
+                  value={to}
+                  onChange={(event) => {
+                    setTo(event.target.value);
+                    setPage(1);
+                  }}
+                />
+              </div>
               <Button type="submit" variant="outline" className="h-10">
                 Search
               </Button>
@@ -302,12 +513,16 @@ export default function ContractsPage() {
                 size="icon"
                 className="size-10"
                 aria-label="Refresh contracts"
-                onClick={() => void loadContracts()}
+                onClick={refreshContracts}
+                disabled={isLoading}
               >
                 <RefreshCw className={isLoading ? "animate-spin" : ""} />
               </Button>
             </form>
 
+            {departmentError && (
+              <p role="alert" className="text-sm text-destructive">{departmentError}</p>
+            )}
             {error ? (
               <div className="flex items-center justify-between gap-4 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
                 <div className="flex items-center gap-2">
@@ -362,6 +577,9 @@ export default function ContractsPage() {
                         </div>
                         <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
                           <span>Amount: {formatAmount(contract)}</span>
+                          <span>Vendor: {contract.recommendedVendor?.name ?? "—"}</span>
+                          <span>Department: {contract.sponsorDepartment?.name ?? "—"}</span>
+                          <span>Submitted: {formatSubmissionDate(contract.submittedAt)}</span>
                           <span>Updated: {formatDate(contract.updatedAt)}</span>
                         </div>
                         <div className="flex gap-2">
@@ -378,6 +596,18 @@ export default function ContractsPage() {
                               <Trash2 />Delete
                             </Button>
                           )}
+                          {contract.attachments?.some((attachment) => attachment.category === "GENERATED_PDF" && attachment.mimeType === "application/pdf") && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={downloadingPdfId !== null}
+                              onClick={() => void downloadPdf(contract)}
+                            >
+                              <FileDown />
+                              {downloadingPdfId === contract.id ? "Downloading..." : "PDF"}
+                            </Button>
+                          )}
                         </div>
                       </CardContent>
                     </Card>
@@ -390,10 +620,12 @@ export default function ContractsPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Contract</TableHead>
+                    <TableHead>Vendor</TableHead>
                     <TableHead>Amount</TableHead>
                     <TableHead>Department</TableHead>
                     <TableHead>Category</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Submission date</TableHead>
                     <TableHead>Updated</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -415,6 +647,7 @@ export default function ContractsPage() {
                             {contract.referenceNo || "No reference number"}
                           </div>
                         </TableCell>
+                        <TableCell>{contract.recommendedVendor?.name ?? "—"}</TableCell>
                         <TableCell>{formatAmount(contract)}</TableCell>
                         <TableCell>
                           {contract.sponsorDepartment?.name ??
@@ -439,6 +672,7 @@ export default function ContractsPage() {
                             {statusLabels[contract.status]}
                           </Badge>
                         </TableCell>
+                        <TableCell>{formatSubmissionDate(contract.submittedAt)}</TableCell>
                         <TableCell>{formatDate(contract.updatedAt)}</TableCell>
                         <TableCell>
                           <div className="flex justify-end gap-1">
@@ -479,6 +713,19 @@ export default function ContractsPage() {
                                 onClick={() => setDeleteTarget(contract)}
                               >
                                 <Trash2 />
+                              </Button>
+                            )}
+                            {contract.attachments?.some((attachment) => attachment.category === "GENERATED_PDF" && attachment.mimeType === "application/pdf") && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label={`Download PDF for ${contract.title || "contract"}`}
+                                title="Download PDF"
+                                disabled={downloadingPdfId !== null}
+                                onClick={() => void downloadPdf(contract)}
+                              >
+                                <FileDown />
                               </Button>
                             )}
                           </div>

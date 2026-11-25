@@ -18,7 +18,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { CompanyDetailsFields, companyContactFields, emptyCompanyDetails, type CompanyDetails } from "@/features/contracts/company-details-fields";
 
 type Category = "departments" | "categories" | "vendor-types" | "currencies" | "vendors";
-type RecordItem = { id: string; name: string; code?: string; vendorType?: { id: string; name: string }; contactDetails?: unknown };
+type RecordItem = { id: string; name: string; code?: string; vendorType?: { id: string; name: string } | null; contactDetails?: unknown };
 
 function contactDetailsRecord(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return {};

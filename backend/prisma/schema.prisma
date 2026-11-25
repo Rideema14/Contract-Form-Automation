@@ -85,6 +85,7 @@ model VendorType {
   id      String   @id @default(uuid())
   name    String   @unique
   vendors Vendor[]
+  bidders Bidder[]
 }
 
 model Currency {
@@ -119,6 +120,7 @@ model ContractForm {
   scope                String?
   procurementRationale String?
   contractAmount       Decimal?           @db.Decimal(19, 4)
+  budgetProvision      Decimal?           @db.Decimal(19, 4)
   currencyId           String?
   recommendedVendorId  String?
   recommendedBidderId  String?
@@ -170,6 +172,7 @@ model Bidder {
   id             String       @id @default(uuid())
   contractFormId String
   vendorId       String?
+  vendorTypeId   String?
   companyName    String
   contactPerson  String?
   email          String?
@@ -178,6 +181,7 @@ model Bidder {
   sortOrder      Int
   contractForm   ContractForm @relation(fields: [contractFormId], references: [id], onDelete: Restrict)
   vendor         Vendor?      @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  vendorType     VendorType?  @relation(fields: [vendorTypeId], references: [id], onDelete: Restrict)
   recommendedBy  ContractForm[] @relation("RecommendedBidder")
   quotations     Quotation[]
   evaluations    Evaluation[]
@@ -185,6 +189,7 @@ model Bidder {
   @@unique([contractFormId, sortOrder])
   @@unique([id, contractFormId])
   @@index([vendorId])
+  @@index([vendorTypeId])
 }
 
 model Quotation {

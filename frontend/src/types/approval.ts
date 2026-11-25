@@ -110,13 +110,17 @@ export interface ApprovalStepInChain {
 export interface BidderItem {
   id: string;
   contractFormId: string;
-  vendorId: string;
+  vendorId: string | null;
+  vendorTypeId: string | null;
   sortOrder: number;
+  companyName: string;
+  vendorType: { id: string; name: string } | null;
   vendor: {
     id: string;
     name: string;
+    vendorType?: { id: string; name: string } | null;
     contactDetails?: Record<string, unknown> | null;
-  };
+  } | null;
   quotations: {
     id: string;
     quotedAmount: string;
@@ -148,10 +152,16 @@ export interface AttachmentItem {
 }
 
 export interface DetailedContractForm extends ContractFormSummary {
+  budgetProvision: string | null;
   scope: string | null;
   procurementRationale: string | null;
   selectionRationale: string | null;
-  recommendedVendor: { id: string; name: string } | null;
+  recommendedVendor: {
+    id: string;
+    name: string;
+    vendorType?: { id: string; name: string } | null;
+  } | null;
+  recommendedBidder: BidderItem | null;
   bidders: BidderItem[];
   costLines: CostLineItem[];
   attachments: AttachmentItem[];

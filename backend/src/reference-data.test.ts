@@ -177,6 +177,23 @@ describe('reference data access', () => {
     ]);
   });
 
+  it('prevents deleting vendor types used by contract bidders', async () => {
+    const cookie = adminCookie();
+    const vendorTypeId = '550e8400-e29b-41d4-a716-446655440001';
+    vi.spyOn(prisma.vendor, 'count').mockResolvedValue(0);
+    const bidderCount = vi.spyOn(prisma.bidder, 'count').mockResolvedValue(1);
+    const deleteVendorType = vi.spyOn(prisma.vendorType, 'delete');
+
+    const response = await request(app)
+      .delete(`/api/reference-data/vendor-types/${vendorTypeId}`)
+      .set('Cookie', cookie);
+
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe('REFERENCE_DATA_IN_USE');
+    expect(bidderCount).toHaveBeenCalledWith({ where: { vendorTypeId } });
+    expect(deleteVendorType).not.toHaveBeenCalled();
+  });
+
   it('rejects duplicate vendor names without creating another vendor', async () => {
     const cookie = adminCookie();
     const findMany = vi.spyOn(prisma.vendor, 'findMany').mockResolvedValue([

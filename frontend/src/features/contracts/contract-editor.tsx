@@ -43,7 +43,7 @@ type EvalDraft = { bidderId: string; type: "TECHNICAL" | "COMMERCIAL"; score: st
 
 const emptyValues: FormValues = {
   referenceNo: "", title: "", sponsorDepartmentId: "", contractCategoryId: "", scope: "",
-  procurementRationale: "", contractAmount: "", currencyId: "", recommendedVendorId: "", selectionRationale: "",
+  procurementRationale: "", contractAmount: "", budgetProvision: "", currencyId: "", recommendedVendorId: "", selectionRationale: "",
   recommendedBidderId: "",
 };
 
@@ -76,8 +76,12 @@ function contractValues(contract: Contract): FormValues {
     referenceNo: contract.referenceNo ?? "", title: contract.title ?? "",
     sponsorDepartmentId: contract.sponsorDepartmentId ?? "", contractCategoryId: contract.contractCategoryId ?? "",
     scope: contract.scope ?? "", procurementRationale: contract.procurementRationale ?? "",
-    contractAmount: contract.contractAmount ?? "", currencyId: contract.currencyId ?? "",
-    recommendedVendorId: contract.recommendedVendorId ?? "", recommendedBidderId: contract.recommendedBidderId ?? "",
+    contractAmount: contract.contractAmount ?? "", budgetProvision: contract.budgetProvision ?? "",
+    currencyId: contract.currencyId ?? "",
+    recommendedVendorId: contract.recommendedVendorId ?? "",
+    recommendedBidderId: contract.recommendedBidderId
+      ?? contract.bidders?.find((bidder) => bidder.vendorId === contract.recommendedVendorId)?.id
+      ?? "",
     selectionRationale: contract.selectionRationale ?? "",
   };
 }
@@ -100,6 +104,14 @@ function validate(
   if (!values.scope.trim()) errors.scope = "Scope of work is required.";
   if (!values.procurementRationale.trim()) errors.procurementRationale = "Procurement rationale is required.";
   if (!/^\d+(?:\.\d{1,4})?$/.test(values.contractAmount)) errors.contractAmount = "Enter a non-negative amount with up to 4 decimals.";
+  if (!/^\d+(?:\.\d{1,4})?$/.test(values.budgetProvision)) errors.budgetProvision = "Enter a non-negative budget provision with up to 4 decimals.";
+  if (!values.currencyId) errors.currencyId = "Select a currency.";
+  const recommendedBidder = bidders.find((bidder) => bidder.id === values.recommendedBidderId);
+  if (!values.recommendedBidderId) {
+    errors.recommendedBidderId = "Select the contracting vendor.";
+  } else if (!recommendedBidder || !(recommendedBidder.vendorType?.name || recommendedBidder.vendor?.vendorType?.name)) {
+    errors.recommendedBidderId = "The contracting vendor must have a vendor type.";
+  }
   if ((values.recommendedVendorId || values.recommendedBidderId) && !values.selectionRationale.trim()) errors.selectionRationale = "Selection rationale is required.";
   if (!bidders.length) errors.bidders = "Bidder Management: add at least one bidder.";
   for (const bidder of bidders) {
@@ -165,6 +177,12 @@ function ReadOnlyContractForm({
     ?? contract.recommendedBidder;
   const currency = refs?.currencies.find((item) => item.id === values.currencyId)
     ?? contract.currency;
+  const contractAmountDisplay = currency
+    ? `${currency.code} ${values.contractAmount || "—"}`
+    : values.contractAmount || "—";
+  const budgetProvisionDisplay = currency
+    ? `${currency.code} ${values.budgetProvision || "—"}`
+    : values.budgetProvision || "—";
 
   return (
     <main className="min-h-screen bg-muted/30 p-4 sm:p-8">
@@ -189,7 +207,7 @@ function ReadOnlyContractForm({
         <Card>
           <CardHeader><CardTitle>Project Description</CardTitle></CardHeader>
           <CardContent>
-            <ReadOnlyField label="Scope of work" value={values.scope} wide />
+            <ReadOnlyField label="Contract Description / Scope of Work" value={values.scope} wide />
           </CardContent>
         </Card>
 
@@ -198,7 +216,7 @@ function ReadOnlyContractForm({
           <CardContent className="grid gap-4 md:grid-cols-2">
             <ReadOnlyField label="Sponsor department" value={refs?.departments.find((item) => item.id === values.sponsorDepartmentId)?.name} />
             <ReadOnlyField label="Contract category" value={refs?.categories.find((item) => item.id === values.contractCategoryId)?.name} />
-            <ReadOnlyField label="Sourcing / procurement rationale" value={values.procurementRationale} wide />
+            <ReadOnlyField label="Business Justification / Procurement Rationale" value={values.procurementRationale} wide />
           </CardContent>
         </Card>
 
@@ -211,6 +229,7 @@ function ReadOnlyContractForm({
                   <div className="min-w-0">
                     <p className="break-words font-semibold">{bidder.companyName || bidder.vendor?.name || "Unnamed bidder"}</p>
                     <p className="text-xs text-muted-foreground">Bidder {bidder.sortOrder + 1}</p>
+                    <p className="text-xs text-muted-foreground">Vendor type: {bidder.vendorType?.name ?? bidder.vendor?.vendorType?.name ?? "—"}</p>
                   </div>
                 </div>
                 <div className="mt-3 grid gap-4 md:grid-cols-2">
@@ -227,9 +246,11 @@ function ReadOnlyContractForm({
         <Card>
           <CardHeader><CardTitle>Financial and Vendor Information</CardTitle></CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2">
-            <ReadOnlyField label="Estimated contract amount" value={values.contractAmount} />
+            <ReadOnlyField label="Estimated contract amount" value={contractAmountDisplay} />
+            <ReadOnlyField label="Budget provision" value={budgetProvisionDisplay} />
             <ReadOnlyField label="Currency" value={currency ? `${currency.code} - ${currency.name}` : undefined} />
             <ReadOnlyField label="Recommended bidder" value={recommendedBidder?.companyName || recommendedBidder?.vendor?.name || contract.recommendedVendor?.name} />
+            <ReadOnlyField label="Vendor type" value={recommendedBidder?.vendorType?.name ?? recommendedBidder?.vendor?.vendorType?.name ?? contract.recommendedVendor?.vendorType?.name} />
             <ReadOnlyField label="Selection rationale" value={values.selectionRationale} wide />
           </CardContent>
         </Card>
@@ -298,7 +319,7 @@ function ReadOnlyContractForm({
               </div>
             )}
             <div className="flex flex-wrap justify-end gap-x-6 gap-y-1 border-t pt-3 text-sm">
-              <span>Subtotal: {costTotal(costLines)}</span><span>Tax: 0.0000</span><strong>Total: {costTotal(costLines)}</strong>
+              <span>Subtotal: {currency?.code ?? ""} {costTotal(costLines)}</span><span>Tax: 0.0000</span><strong>Total: {currency?.code ?? ""} {costTotal(costLines)}</strong>
             </div>
           </CardContent>
         </Card>
@@ -330,6 +351,7 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
   const [newVendor, setNewVendor] = useState("");
   const [companySelection, setCompanySelection] = useState("");
   const [newCompany, setNewCompany] = useState<CompanyDetails>(emptyCompanyDetails);
+  const [newCompanyVendorTypeId, setNewCompanyVendorTypeId] = useState("");
   const [quotationDrafts, setQuotationDrafts] = useState<Record<string, QuotationDraft>>({});
   const [costLines, setCostLines] = useState<CostLine[]>([]);
   const [costDraft, setCostDraft] = useState<CostDraft>({ description: "", quantity: "", unitCost: "", amount: "" });
@@ -365,7 +387,7 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
     Boolean(values.scope.trim()),
     Boolean(values.sponsorDepartmentId && values.contractCategoryId && values.procurementRationale.trim()),
     bidders.length > 0,
-    Boolean(values.contractAmount && values.currencyId),
+    Boolean(values.contractAmount && values.currencyId && values.budgetProvision && values.recommendedBidderId),
     costLines.length > 0,
     approverIds.length > 0,
     Boolean(activeContractId),
@@ -457,6 +479,7 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
       recommendedVendorId: currentValues.recommendedVendorId || null,
       selectionRationale: currentValues.selectionRationale.trim() || null,
       recommendedBidderId: currentValues.recommendedBidderId || null,
+      budgetProvision: currentValues.budgetProvision.trim() || null,
       dynamicValues: latestDynamicValues.current,
     };
     setSaveState("Saving...");
@@ -543,6 +566,7 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
         recommendedVendorId: body.recommendedVendorId || null,
         recommendedBidderId: body.recommendedBidderId || null,
         selectionRationale: body.selectionRationale.trim() || null,
+        budgetProvision: body.budgetProvision.trim() || null,
         dynamicValues: latestDynamicValues.current,
       };
       const id = activeContractId;
@@ -635,11 +659,16 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
       toast.error("Enter a company name for the new company.");
       return;
     }
+    if (companySelection === "__new__" && !newCompanyVendorTypeId) {
+      toast.error("Select a vendor type for the new company.");
+      return;
+    }
     const selectedCompany = refs?.vendors.find((vendor) => vendor.id === companySelection);
     const existingContact = companyContactFields(selectedCompany?.contactDetails);
     try {
       const bidder = await createBidder(form.id, {
         vendorId: companySelection === "__new__" ? null : newVendor || null,
+        vendorTypeId: companySelection === "__new__" ? newCompanyVendorTypeId : undefined,
         companyName: companySelection === "__new__" ? newCompany.companyName : undefined,
         contactPerson: companySelection === "__new__" ? newCompany.contactPerson || null : existingContact.contactPerson || null,
         email: companySelection === "__new__" ? newCompany.email || null : existingContact.email || null,
@@ -650,9 +679,21 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
       setNewVendor("");
       setCompanySelection("");
       setNewCompany(emptyCompanyDetails);
+      setNewCompanyVendorTypeId("");
       toast.success("Bidder added.");
     } catch (createError) {
       toast.error(errorMessage(createError, "Unable to add bidder."));
+    }
+  }
+
+  async function changeBidderVendorType(bidder: Bidder, vendorTypeId: string) {
+    if (!contract?.id || bidder.vendorId) return;
+    try {
+      const updated = await updateBidder(contract.id, bidder.id, { vendorTypeId: vendorTypeId || null });
+      setBidders((current) => current.map((item) => item.id === bidder.id ? { ...item, ...updated } : item));
+      toast.success("Vendor type updated.");
+    } catch (updateError) {
+      toast.error(errorMessage(updateError, "Unable to update vendor type."));
     }
   }
 
@@ -795,8 +836,8 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
       : field === "scope" ? "project-description"
       : field === "sponsorDepartmentId" || field === "contractCategoryId" || field === "procurementRationale" ? "contract-information"
       : field.startsWith("quotation") || field.startsWith("evaluation") || field === "bidders" ? "bidder-management"
-      : field === "contractAmount" || field === "selectionRationale" || field === "recommendedBidderId" ? "financial-information"
-      : field === "costLines" ? "budget-information"
+      : field === "contractAmount" || field === "currencyId" || field === "selectionRationale" || field === "recommendedBidderId" ? "financial-information"
+      : field === "budgetProvision" || field === "costLines" ? "budget-information"
       : field === "approverIds" ? "approval-workflow"
       : "custom-form-fields";
     document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -826,9 +867,28 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
     </section>
     {attempted && Object.keys(errors).length > 0 && <div role="alert" className="scroll-mt-36 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive"><p className="font-semibold">Complete these items before submitting:</p><ul className="mt-2 list-inside space-y-1">{Object.entries(errors).map(([field, message]) => <li key={field}><button type="button" className="text-left underline underline-offset-2" onClick={() => goToError(field)}>{message}</button></li>)}</ul></div>}
     <Card id="project-identification" className="scroll-mt-40 order-1"><CardHeader><CardTitle>Project identification</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{input("title", "Project name / contractor / contract title")}{input("referenceNo", "Reference number", "text", true)}</CardContent></Card>
-    <Card id="project-description" className="scroll-mt-40 order-2"><CardHeader><CardTitle>Project Description</CardTitle></CardHeader><CardContent><div className="space-y-2"><Label htmlFor="scope">Scope of work</Label><Textarea id="scope" value={values.scope} onChange={(event) => setValue("scope", event.target.value)} aria-invalid={Boolean(errors.scope)} />{errors.scope && <p className="text-sm text-destructive">{errors.scope}</p>}</div></CardContent></Card>
-    <Card id="contract-information" className="scroll-mt-40 order-3"><CardHeader><CardTitle>Contract information</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{select("sponsorDepartmentId", "Sponsor department", refs?.departments ?? [], "Select department")}{select("contractCategoryId", "Contract category", refs?.categories ?? [], "Select category")}<div className="md:col-span-2 space-y-2"><Label htmlFor="procurementRationale">Sourcing / procurement rationale</Label><Textarea id="procurementRationale" value={values.procurementRationale} onChange={(event) => setValue("procurementRationale", event.target.value)} aria-invalid={Boolean(errors.procurementRationale)} />{errors.procurementRationale && <p className="text-sm text-destructive">{errors.procurementRationale}</p>}</div></CardContent></Card>
-    <Card id="financial-information" className="scroll-mt-40 order-5"><CardHeader><CardTitle>Financial and vendor information</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{input("contractAmount", "Estimated contract amount", "number")}{select("currencyId", "Currency", (refs?.currencies ?? []).map((item) => ({ id: item.id, name: `${item.code} - ${item.name}` })), "Select currency")}<div className="space-y-2"><Label htmlFor="recommendedBidderId">Recommended bidder</Label><select id="recommendedBidderId" className="h-9 w-full rounded-lg border bg-background px-2 text-sm" value={values.recommendedBidderId} onChange={(event) => { setValue("recommendedBidderId", event.target.value); setValue("recommendedVendorId", ""); }}><option value="">No recommendation</option>{bidders.map((bidder) => <option key={bidder.id} value={bidder.id}>{bidder.companyName || bidder.vendor?.name}</option>)}</select>{bidders.length === 0 && <p className="text-sm text-muted-foreground">Please add a bidder in Bidder Management before selecting a recommended bidder.</p>}</div><div className="space-y-2"><Label htmlFor="selectionRationale">Selection rationale</Label><Textarea id="selectionRationale" value={values.selectionRationale} onChange={(event) => setValue("selectionRationale", event.target.value)} aria-invalid={Boolean(errors.selectionRationale)} />{errors.selectionRationale && <p className="text-sm text-destructive">{errors.selectionRationale}</p>}</div></CardContent></Card>
+    <Card id="project-description" className="scroll-mt-40 order-2"><CardHeader><CardTitle>Project Description</CardTitle></CardHeader><CardContent><div className="space-y-2"><Label htmlFor="scope">Contract Description / Scope of Work</Label><Textarea id="scope" value={values.scope} onChange={(event) => setValue("scope", event.target.value)} aria-invalid={Boolean(errors.scope)} />{errors.scope && <p className="text-sm text-destructive">{errors.scope}</p>}</div></CardContent></Card>
+    <Card id="contract-information" className="scroll-mt-40 order-3"><CardHeader><CardTitle>Contract information</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{select("sponsorDepartmentId", "Sponsor department", refs?.departments ?? [], "Select department")}{select("contractCategoryId", "Contract category", refs?.categories ?? [], "Select category")}<div className="md:col-span-2 space-y-2"><Label htmlFor="procurementRationale">Business Justification / Procurement Rationale</Label><Textarea id="procurementRationale" placeholder="Explain the business need, procurement approach, and supporting rationale." value={values.procurementRationale} onChange={(event) => setValue("procurementRationale", event.target.value)} aria-invalid={Boolean(errors.procurementRationale)} />{errors.procurementRationale && <p className="text-sm text-destructive">{errors.procurementRationale}</p>}</div></CardContent></Card>
+    <Card id="financial-information" className="scroll-mt-40 order-5">
+      <CardHeader><CardTitle>Financial and vendor information</CardTitle></CardHeader>
+      <CardContent className="grid gap-4 md:grid-cols-2">
+        {input("contractAmount", "Estimated contract amount *", "number")}
+        <div>
+          {select("currencyId", "Contract currency *", (refs?.currencies ?? []).map((item) => ({ id: item.id, name: `${item.code} - ${item.name}` })), "Select currency")}
+          <p className="mt-2 text-xs text-muted-foreground">Required before submission; drafts may leave this blank.</p>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="recommendedBidderId">Contracting vendor / recommended bidder *</Label>
+          <select id="recommendedBidderId" className="h-9 w-full rounded-lg border bg-background px-2 text-sm" value={values.recommendedBidderId} onChange={(event) => { setValue("recommendedBidderId", event.target.value); setValue("recommendedVendorId", ""); }} aria-invalid={Boolean(errors.recommendedBidderId)}>
+            <option value="">Select contracting vendor</option>
+            {bidders.map((bidder) => <option key={bidder.id} value={bidder.id}>{bidder.companyName || bidder.vendor?.name} — {bidder.vendorType?.name ?? bidder.vendor?.vendorType?.name ?? "Type missing"}</option>)}
+          </select>
+          {errors.recommendedBidderId && <p className="text-sm text-destructive">{errors.recommendedBidderId}</p>}
+          {bidders.length === 0 && <p className="text-sm text-muted-foreground">Please add a bidder in Bidder Management before selecting a contracting vendor.</p>}
+        </div>
+        <div className="space-y-2"><Label htmlFor="selectionRationale">Selection rationale</Label><Textarea id="selectionRationale" value={values.selectionRationale} onChange={(event) => setValue("selectionRationale", event.target.value)} aria-invalid={Boolean(errors.selectionRationale)} />{errors.selectionRationale && <p className="text-sm text-destructive">{errors.selectionRationale}</p>}</div>
+      </CardContent>
+    </Card>
     <Card id="bidder-management" className="scroll-mt-40 order-4">
       <CardHeader><CardTitle>Bidder Management</CardTitle></CardHeader>
       <CardContent className="space-y-4">
@@ -843,12 +903,17 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
                 onChange={(event) => {
                   const selection = event.target.value;
                   setCompanySelection(selection);
-                  if (selection === "__new__") setNewVendor("");
+                  if (selection === "__new__") {
+                    setNewVendor("");
+                    setNewCompanyVendorTypeId("");
+                  }
                   else if (selection) {
                     setNewVendor(selection);
                     setNewCompany(emptyCompanyDetails);
+                    setNewCompanyVendorTypeId("");
                   } else {
                     setNewVendor("");
+                    setNewCompanyVendorTypeId("");
                   }
                 }}
               >
@@ -876,6 +941,24 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
               className="grid gap-3 rounded-lg border bg-muted/20 p-4 md:grid-cols-2"
             />
           )}
+          {companySelection === "__new__" && (
+            <div className="space-y-2 rounded-lg border bg-muted/20 p-4">
+              <Label htmlFor="new-company-vendor-type">Vendor Type</Label>
+              <select
+                id="new-company-vendor-type"
+                className="h-10 w-full rounded-lg border bg-background px-3 text-sm"
+                value={newCompanyVendorTypeId}
+                onChange={(event) => setNewCompanyVendorTypeId(event.target.value)}
+                required
+              >
+                <option value="">Select vendor type</option>
+                {(refs?.vendorTypes ?? []).map((vendorType) => (
+                  <option key={vendorType.id} value={vendorType.id}>{vendorType.name}</option>
+                ))}
+              </select>
+              {!refs?.vendorTypes.length && <p className="text-sm text-muted-foreground">Add a vendor type in reference data before adding a new company.</p>}
+            </div>
+          )}
           {companySelection && companySelection !== "__new__" && (() => {
             const company = refs?.vendors.find((vendor) => vendor.id === companySelection);
             if (!company) return null;
@@ -883,6 +966,7 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
             return (
               <div className="rounded-lg border bg-muted/20 p-4" aria-live="polite">
                 <p className="font-medium">{company.name}</p>
+                <p className="text-sm text-muted-foreground">Vendor type: {company.vendorType?.name ?? "—"}</p>
                 <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
                   <div><dt className="text-muted-foreground">Contact Person</dt><dd>{details.contactPerson || "—"}</dd></div>
                   <div><dt className="text-muted-foreground">Email</dt><dd>{details.email || "—"}</dd></div>
@@ -898,7 +982,28 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
           const draft = quotationDrafts[bidder.id] ?? { amount: "", notes: "" };
           return <div key={bidder.id} className="space-y-4 rounded-lg border p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div><p className="font-semibold">{bidder.companyName || bidder.vendor?.name}</p><p className="text-xs text-muted-foreground">Bidder {bidder.sortOrder + 1}</p></div>
+              <div>
+                <p className="font-semibold">{bidder.companyName || bidder.vendor?.name}</p>
+                <p className="text-xs text-muted-foreground">Bidder {bidder.sortOrder + 1}</p>
+                {bidder.vendorId ? (
+                  <p className="text-xs text-muted-foreground">Vendor type: {bidder.vendor?.vendorType?.name ?? "—"}</p>
+                ) : (
+                  <div className="mt-1 flex items-center gap-2">
+                    <Label htmlFor={`bidder-vendor-type-${bidder.id}`} className="text-xs">Vendor type</Label>
+                    <select
+                      id={`bidder-vendor-type-${bidder.id}`}
+                      className="h-8 rounded-lg border bg-background px-2 text-xs"
+                      value={bidder.vendorTypeId ?? ""}
+                      onChange={(event) => void changeBidderVendorType(bidder, event.target.value)}
+                    >
+                      <option value="">Select vendor type</option>
+                      {(refs?.vendorTypes ?? []).map((vendorType) => (
+                        <option key={vendorType.id} value={vendorType.id}>{vendorType.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
               <div className="flex flex-wrap gap-1"><Button size="sm" variant="outline" onClick={() => void editBidder(bidder)}>Edit details</Button><Button size="sm" variant="ghost" className="text-destructive" onClick={() => void removeBidder(bidder)}><Trash2 />Remove</Button></div>
             </div>
             <div>
@@ -931,6 +1036,10 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
       <CardHeader><CardTitle>Budget and cost information</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">Tax is not configured; tax is 0.00.</p>
+        <div className="max-w-sm space-y-2">
+          {input("budgetProvision", "Budget provision *", "number")}
+          <p className="text-xs text-muted-foreground">Required before submission; drafts may leave this blank. Enter the overall approved/provided budget separately from the cost-line estimate using the selected contract currency.</p>
+        </div>
         {costLines.map((line) => (
           <div key={line.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2 text-sm">
             <span>{line.description}: {line.quantity} × {line.unitCost} = {line.amount}</span>

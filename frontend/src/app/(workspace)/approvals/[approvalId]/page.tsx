@@ -118,6 +118,17 @@ if (refreshedDetail.contractFormId) {
   }
 
   const { contractForm, approver, status, level, actedAt } = stepDetail;
+  const contractingBidder = contractForm.recommendedBidder
+    ?? contractForm.bidders.find((bidder) => bidder.vendorId === contractForm.recommendedVendor?.id);
+  const contractingVendorName = contractingBidder?.companyName
+    || contractingBidder?.vendor?.name
+    || contractForm.recommendedVendor?.name
+    || 'No contracting vendor selected';
+  const contractingVendorType = contractingBidder?.vendorType?.name
+    || contractingBidder?.vendor?.vendorType?.name
+    || contractForm.recommendedVendor?.vendorType?.name
+    || '—';
+  const currencyCode = contractForm.currency?.code ?? '';
   const isCurrentApprover =
     !authLoading && !!authUser && status === 'PENDING' && authUser.id === approver.id;
 
@@ -196,6 +207,38 @@ if (refreshedDetail.contractFormId) {
             <span className="font-medium text-foreground">
               {actedAt ? new Date(actedAt).toLocaleString() : 'Pending Decision'}
             </span>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Contract review information</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Contracting vendor</p>
+            <p className="mt-1 font-medium">{contractingVendorName}</p>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Vendor type</p>
+            <p className="mt-1">{contractingVendorType}</p>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Contract amount</p>
+            <p className="mt-1">{`${currencyCode} ${contractForm.contractAmount ?? '—'}`.trim()}</p>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Budget provision</p>
+            <p className="mt-1">{`${currencyCode} ${contractForm.budgetProvision ?? '—'}`.trim()}</p>
+          </div>
+          <div className="sm:col-span-2 lg:col-span-3">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Contract Description / Scope of Work</p>
+            <p className="mt-1 whitespace-pre-wrap">{contractForm.scope || '—'}</p>
+          </div>
+          <div className="sm:col-span-2 lg:col-span-3">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Business Justification / Procurement Rationale</p>
+            <p className="mt-1 whitespace-pre-wrap">{contractForm.procurementRationale || '—'}</p>
           </div>
         </CardContent>
       </Card>

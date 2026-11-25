@@ -18,7 +18,10 @@ export type ContractListParams = {
   page: number;
   pageSize: number;
   status?: ContractStatus;
+  departmentId?: string;
   q?: string;
+  from?: string;
+  to?: string;
 };
 
 function toQueryString(params: ContractListParams): string {
@@ -28,7 +31,10 @@ function toQueryString(params: ContractListParams): string {
   });
 
   if (params.status) searchParams.set("status", params.status);
+  if (params.departmentId) searchParams.set("departmentId", params.departmentId);
   if (params.q) searchParams.set("q", params.q);
+  if (params.from) searchParams.set("from", params.from);
+  if (params.to) searchParams.set("to", params.to);
 
   return searchParams.toString();
 }
@@ -108,11 +114,11 @@ export function listBidders(formId: string): Promise<{ items: Bidder[] }> {
   return apiGet<{ items: Bidder[] }>(`/forms/${formId}/bidders`);
 }
 
-export function createBidder(formId: string, body: { vendorId?: string | null; companyName?: string; contactPerson?: string | null; email?: string | null; phone?: string | null; qualifications?: string | null; sortOrder?: number }): Promise<Bidder> {
+export function createBidder(formId: string, body: { vendorId?: string | null; vendorTypeId?: string | null; companyName?: string; contactPerson?: string | null; email?: string | null; phone?: string | null; qualifications?: string | null; sortOrder?: number }): Promise<Bidder> {
   return apiPost<Bidder>(`/forms/${formId}/bidders`, body);
 }
 
-export function updateBidder(formId: string, bidderId: string, body: Partial<{ vendorId: string | null; companyName: string; contactPerson: string | null; email: string | null; phone: string | null; qualifications: string | null; sortOrder: number }>): Promise<Bidder> {
+export function updateBidder(formId: string, bidderId: string, body: Partial<{ vendorId: string | null; vendorTypeId: string | null; companyName: string; contactPerson: string | null; email: string | null; phone: string | null; qualifications: string | null; sortOrder: number }>): Promise<Bidder> {
   return apiPatch<Bidder>(`/forms/${formId}/bidders/${bidderId}`, body);
 }
 

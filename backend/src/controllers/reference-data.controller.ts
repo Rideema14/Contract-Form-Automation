@@ -219,8 +219,12 @@ export async function deleteReferenceRecord(req: Request, res: Response, next: N
       reason = 'contract forms';
       if (usageCount === 0) await prisma.contractCategory.delete({ where: { id } });
     } else if (category === 'vendor-types') {
-      usageCount = await prisma.vendor.count({ where: { vendorTypeId: id } });
-      reason = 'vendors';
+      const [vendors, bidders] = await Promise.all([
+        prisma.vendor.count({ where: { vendorTypeId: id } }),
+        prisma.bidder.count({ where: { vendorTypeId: id } }),
+      ]);
+      usageCount = vendors + bidders;
+      reason = 'vendors or contract bidders';
       if (usageCount === 0) await prisma.vendorType.delete({ where: { id } });
     } else if (category === 'currencies') {
       const [contracts, quotations] = await Promise.all([

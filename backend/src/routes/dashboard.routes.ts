@@ -21,16 +21,14 @@ router.get('/', async (req, res, next) => {
           ? { approvalSteps: { some: { approverId: req.authUser.id } } }
           : { createdById: req.authUser.id };
 
-    const [all, draft, pending, approved, rejected, recent] = await Promise.all([
+    const [all, draft, pending, approved, returned, rejected, recent] = await Promise.all([
       prisma.contractForm.count({ where: visibility }),
       prisma.contractForm.count({ where: { ...visibility, status: ContractStatus.DRAFT } }),
       prisma.contractForm.count({ where: { ...visibility, status: ContractStatus.PENDING_APPROVAL } }),
       prisma.contractForm.count({ where: { ...visibility, status: ContractStatus.APPROVED } }),
+      prisma.contractForm.count({ where: { ...visibility, status: ContractStatus.RETURNED } }),
       prisma.contractForm.count({
-        where: {
-          ...visibility,
-          status: { in: [ContractStatus.REJECTED, ContractStatus.RETURNED] },
-        },
+        where: { ...visibility, status: ContractStatus.REJECTED },
       }),
       prisma.contractForm.findMany({
         where: visibility,
@@ -39,13 +37,15 @@ router.get('/', async (req, res, next) => {
         include: {
           sponsorDepartment: true,
           contractCategory: true,
+          currency: true,
+          recommendedVendor: true,
           createdBy: { select: { id: true, fullName: true, email: true } },
         },
       }),
     ]);
 
     sendSuccess(req, res, 200, 'Dashboard data retrieved', {
-      counts: { all, draft, pending, approved, rejected },
+      counts: { all, draft, pending, approved, returned, rejected },
       recent,
     });
   } catch (error) {

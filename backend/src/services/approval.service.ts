@@ -115,10 +115,20 @@ export async function getApprovalStepDetail(stepId: string, user: AuthUser) {
           sponsorDepartment: true,
           contractCategory: true,
           currency: true,
-          recommendedVendor: true,
+          recommendedVendor: { include: { vendorType: true } },
+          recommendedBidder: {
+            include: {
+              vendorType: true,
+              vendor: { include: { vendorType: true } },
+            },
+          },
           bidders: {
             orderBy: { sortOrder: 'asc' },
-            include: { vendor: true, quotations: { include: { currency: true } } },
+            include: {
+              vendorType: true,
+              vendor: { include: { vendorType: true } },
+              quotations: { include: { currency: true } },
+            },
           },
           evaluations: true,
           costLines: { orderBy: { sortOrder: 'asc' } },

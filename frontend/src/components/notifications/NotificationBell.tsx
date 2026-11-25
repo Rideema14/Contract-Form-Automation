@@ -7,6 +7,8 @@ import {
   markNotificationAsRead,
   markAllNotificationsAsRead,
 } from '@/lib/notification-service';
+import { apiGet, ApiError } from '@/lib/api-client';
+import type { ApprovalHistoryResponse } from '@/types/approval';
 import type { NotificationItem } from '@/types/notification';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -19,6 +21,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
+import { toast } from 'sonner';
 
 export function NotificationBell() {
   const router = useRouter();
@@ -91,17 +94,68 @@ export function NotificationBell() {
 
     setIsOpen(false);
 
-    if (!item.contractFormId) return;
-    if (authUser?.role === 'SUBMITTER') {
-      const status = item.contractForm?.status;
-      const section = status === 'APPROVED' ? 'approved'
-        : status === 'RETURNED' ? 'returned'
-          : status === 'REJECTED' ? 'rejected'
-            : 'pending';
-      router.push(`/approvals?status=${section}&contract=${encodeURIComponent(item.contractFormId)}`);
+    const contractId = item.contractFormId;
+    if (
+      typeof contractId !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(contractId)
+    ) {
+      toast.error('This notification is not linked to a valid contract.');
       return;
     }
-    router.push('/approvals');
+
+    const contractPath = `/contracts/${encodeURIComponent(contractId)}`;
+    const status = item.contractForm?.status;
+    const section = status === 'APPROVED' ? 'approved'
+      : status === 'RETURNED' ? 'returned'
+        : status === 'REJECTED' ? 'rejected'
+          : 'pending';
+    const returnTo = `/approvals?status=${section}`;
+    const viewHref = `${contractPath}?view=1&return=${encodeURIComponent(returnTo)}`;
+
+    if (status === 'RETURNED') {
+      router.push(`${contractPath}?edit=1&return=${encodeURIComponent(returnTo)}`);
+      return;
+    }
+
+    if (status === 'APPROVED') {
+      router.push(viewHref);
+      return;
+    }
+
+    if (
+      status === 'PENDING_APPROVAL' &&
+      (authUser?.role === 'APPROVER' || authUser?.role === 'ADMIN')
+    ) {
+      try {
+        const history = await apiGet<ApprovalHistoryResponse>(
+          `/approvals/history/${encodeURIComponent(contractId)}`,
+        );
+        const activeStep = history.approvalSteps.find(
+          (step) =>
+            step.status === 'PENDING' &&
+            (authUser.role === 'ADMIN' || step.approverId === authUser.id),
+        );
+
+        if (activeStep) {
+          router.push(`/approvals/${encodeURIComponent(activeStep.id)}`);
+        } else {
+          toast.error('This contract is no longer awaiting your approval.');
+          router.push(viewHref);
+        }
+      } catch (caught) {
+        toast.error(
+          caught instanceof ApiError
+            ? caught.message
+            : caught instanceof Error
+              ? caught.message
+              : 'Could not load approval details.',
+        );
+        router.push(viewHref);
+      }
+      return;
+    }
+
+    router.push(viewHref);
   };
 
   const handleMarkAllRead = async () => {

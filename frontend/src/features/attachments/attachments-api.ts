@@ -114,7 +114,10 @@ export async function uploadAttachments(
 }
 
 /** Files are private: they are downloaded through the backend, never from a public Drive link. */
-export async function downloadAttachment(formId: string, attachment: Attachment): Promise<void> {
+export async function downloadAttachment(
+  formId: string,
+  attachment: Pick<Attachment, "id" | "fileName">,
+): Promise<void> {
   const response = await fetch(`${API_BASE_URL}${base(formId)}/${encodeURIComponent(attachment.id)}/download`, {
     credentials: "include",
   });

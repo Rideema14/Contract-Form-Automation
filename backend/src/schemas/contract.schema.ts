@@ -15,6 +15,7 @@ export const contractDraftSchema = z.object({
   scope: optionalText,
   procurementRationale: optionalText,
   contractAmount: decimal.optional().nullable(),
+  budgetProvision: decimal.optional().nullable(),
   currencyId: uuid.optional().nullable(),
   recommendedVendorId: uuid.optional().nullable(),
   recommendedBidderId: uuid.optional().nullable(),
@@ -43,6 +44,7 @@ export const contractListQuerySchema = z.object({
 
 export const bidderSchema = z.object({
   vendorId: uuid.optional().nullable(),
+  vendorTypeId: uuid.optional().nullable(),
   companyName: z.string().trim().min(1).max(255).optional(),
   contactPerson: z.string().trim().max(255).optional().nullable(),
   email: z.string().trim().email().max(255).optional().nullable(),
