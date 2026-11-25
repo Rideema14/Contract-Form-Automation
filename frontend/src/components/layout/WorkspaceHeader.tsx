@@ -32,7 +32,7 @@ export function WorkspaceHeader() {
         ]
       : [];
 
-  const allLinks = [...primaryLinks, ...adminLinks];
+  
 
   function signOut() {
     void logout().then(() => router.replace('/login')).catch(() => undefined);
@@ -84,9 +84,6 @@ export function WorkspaceHeader() {
             {adminLinks.length > 0 && (
               <>
                 <span aria-hidden="true" className="mx-2 h-5 w-px bg-border" />
-                <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Admin
-                </span>
                 {adminLinks.map((link) => (
                   <NextLink
                     key={link.href}

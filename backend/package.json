@@ -15,7 +15,8 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "create:test-user": "tsx scripts/create-test-user.ts",
-    "seed:demo": "tsx prisma/seed-demo-users.ts"
+    "seed:demo": "tsx prisma/seed-demo-users.ts",
+    "seed:showcase": "tsx prisma/seed-showcase.ts"
   },
   "keywords": [],
   "author": "",

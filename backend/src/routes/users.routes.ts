@@ -25,6 +25,11 @@ const updateUserSchema = z.object({
   isActive: z.boolean().optional(),
   departmentId: z.string().uuid().nullable().optional(),
   fullName: z.string().trim().min(1).max(255).optional(),
+  email: z.string().trim().email().max(255).transform((value) => value.toLowerCase()).optional(),
+  password: z.preprocess(
+    (value) => value === '' ? undefined : value,
+    z.string().min(8).max(128).optional(),
+  ),
 }).strict();
 
 function parseUserInput<T>(schema: z.ZodType<T>, input: unknown): T {
@@ -91,15 +96,29 @@ router.patch('/:id', requireRoles(UserRole.ADMIN), async (req, res, next) => {
     if (!z.string().uuid().safeParse(id).success) {
       throw new AppError(400, 'VALIDATION_ERROR', 'Invalid user ID');
     }
-    const { role, isActive, departmentId, fullName } =
+    const { role, isActive, departmentId, fullName, email, password } =
       parseUserInput(updateUserSchema, req.body);
     const actorId = getActorId(req);
+    const passwordHash = password ? await bcrypt.hash(password, 12) : undefined;
     const user = await prisma.$transaction(async (tx) => {
       const previous = await tx.user.findUnique({
         where: { id },
-        select: { role: true, isActive: true, departmentId: true, fullName: true },
+        select: { role: true, isActive: true, departmentId: true, fullName: true, email: true },
       });
       if (!previous) throw new AppError(404, 'NOT_FOUND', 'User not found');
+
+      const emailChanged = email !== undefined && email !== previous.email;
+      if (emailChanged) {
+        const existingEmail = await tx.user.findUnique({
+          where: { email },
+          select: { id: true },
+        });
+        if (existingEmail && existingEmail.id !== id) {
+          throw new AppError(409, 'DUPLICATE_EMAIL', 'A user with this email already exists', [
+            { path: 'email', message: 'Email is already in use' },
+          ]);
+        }
+      }
 
       const updated = await tx.user.update({
         where: { id },
@@ -108,6 +127,8 @@ router.patch('/:id', requireRoles(UserRole.ADMIN), async (req, res, next) => {
           ...(isActive !== undefined ? { isActive } : {}),
           ...(departmentId !== undefined ? { departmentId } : {}),
           ...(fullName !== undefined ? { fullName: fullName.trim() } : {}),
+          ...(emailChanged ? { email } : {}),
+          ...(passwordHash !== undefined ? { passwordHash } : {}),
         },
         select: { id: true, fullName: true, email: true, role: true, isActive: true, departmentId: true, createdAt: true },
       });
@@ -116,6 +137,8 @@ router.patch('/:id', requireRoles(UserRole.ADMIN), async (req, res, next) => {
         ...(previous.isActive !== updated.isActive ? ['isActive'] : []),
         ...(previous.departmentId !== updated.departmentId ? ['departmentId'] : []),
         ...(previous.fullName !== updated.fullName ? ['fullName'] : []),
+        ...(emailChanged ? ['email'] : []),
+        ...(passwordHash !== undefined ? ['password'] : []),
       ];
       await recordAuditEvent(tx, {
         actorId,
@@ -128,6 +151,7 @@ router.patch('/:id', requireRoles(UserRole.ADMIN), async (req, res, next) => {
           ...(previous.isActive !== updated.isActive
             ? { isActive: { from: previous.isActive, to: updated.isActive } }
             : {}),
+          ...(emailChanged ? { email: { from: previous.email, to: updated.email } } : {}),
         },
       });
       return updated;

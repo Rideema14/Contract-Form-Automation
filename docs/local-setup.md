@@ -43,6 +43,16 @@ requires the local `contract_automation` database. `TEST_USER_ROLE` can also be 
 (defaults to `SUBMITTER`); `ADMIN` is not available through this script. Existing accounts
 are left unchanged.
 
+## Showcase PDF attachment check
+The guarded showcase seed includes a draft contract named **Procurement Attachment Demonstration**
+(`CF-SHOW-0009`). When Google Drive and document-upload configuration are available, the seed
+generates a current contract PDF and stores it through the existing document service. If Drive is
+not configured, the contract remains available without fabricated attachment metadata.
+
+To test the manual upload path, sign in as the existing submitter demo account, open the draft
+contract `CF-SHOW-0009`, and upload a valid PDF as a Supporting document. Confirm it appears in the
+contract's attachment list and can be opened or downloaded through the application.
+
 ## Optional demo login cards
 The login page includes Admin, Approver, and Submitter demo cards. They are disabled by default.
 To enable them, configure `NEXT_PUBLIC_DEMO_LOGIN_ENABLED=true` and the matching
