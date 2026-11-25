@@ -12,6 +12,7 @@ const CATEGORIES: { value: UploadableCategory; label: string }[] = [
   { value: "SUPPORTING", label: "Supporting document" },
   { value: "COST_ESTIMATE_EXCEL", label: "Cost estimate (Excel)" },
 ];
+const EXCEL_EXTENSIONS = new Set(["xls", "xlsx"]);
 
 type UploadStatus = "selected" | "uploading" | "uploaded" | "error";
 interface PendingFile {
@@ -36,7 +37,7 @@ interface AttachmentUploaderProps {
 function fileError(file: File, category: UploadableCategory, limits: UploadLimits): string | null {
   const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
   if (!limits.allowedExtensions.includes(extension)) return `.${extension || "unknown"} files are not allowed.`;
-  if (category === "COST_ESTIMATE_EXCEL" && !["xls", "xlsx"].includes(extension)) {
+  if (category === "COST_ESTIMATE_EXCEL" && !EXCEL_EXTENSIONS.has(extension)) {
     return "Cost estimates must be Excel files.";
   }
   if (file.size === 0) return "This file is empty.";
@@ -60,6 +61,13 @@ export function AttachmentUploader({ formId, limits, onUploaded, onUploadStateCh
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const uploadInProgress = useRef(false);
+  const excelUploadsAllowed = !limits || limits.allowedExtensions.some((extension) => EXCEL_EXTENSIONS.has(extension));
+  const activeCategory = !excelUploadsAllowed && category === "COST_ESTIMATE_EXCEL"
+    ? "SUPPORTING"
+    : category;
+  const acceptedExtensions = limits?.allowedExtensions.filter((extension) =>
+    activeCategory !== "COST_ESTIMATE_EXCEL" || EXCEL_EXTENSIONS.has(extension)
+  ) ?? [];
 
   const submit = useCallback(async (autoOnly = false) => {
     if (uploadInProgress.current || !formId || !limits) return;
@@ -82,7 +90,7 @@ export function AttachmentUploader({ formId, limits, onUploaded, onUploadStateCh
     const invalid = candidates
       .map((item) => ({
         id: item.id,
-        message: item.displayName.trim() ? fileError(item.file, category, limits) : "Enter a display name.",
+        message: item.displayName.trim() ? fileError(item.file, activeCategory, limits) : "Enter a display name.",
       }))
       .filter((item): item is { id: string; message: string } => Boolean(item.message));
     if (invalid.length) {
@@ -115,7 +123,7 @@ export function AttachmentUploader({ formId, limits, onUploaded, onUploadStateCh
         try {
           const uploaded = await uploadAttachments(
             formId,
-            category,
+            activeCategory,
             [item.file],
             [item.displayName],
             (progress) => setFiles((current) => current.map((file) =>
@@ -154,7 +162,7 @@ export function AttachmentUploader({ formId, limits, onUploaded, onUploadStateCh
       (!candidateIds.has(item.id) || failedIds.has(item.id))
     );
     if (!hasUnresolvedPreDraftFiles) onPreDraftPendingChange?.(false);
-  }, [files, formId, limits, onPreDraftPendingChange, onUploadStateChange, onUploaded, category]);
+  }, [files, formId, limits, onPreDraftPendingChange, onUploadStateChange, onUploaded, activeCategory]);
 
   useEffect(() => {
     if (!formId || !limits || !files.some((item) => item.autoUpload && item.status === "selected")) return;
@@ -178,24 +186,32 @@ export function AttachmentUploader({ formId, limits, onUploaded, onUploadStateCh
       <select
         aria-label="Attachment category"
         className="h-8 rounded-lg border border-border bg-background px-2 text-sm"
-        value={category}
+        value={activeCategory}
         onChange={(event) => setCategory(event.target.value as UploadableCategory)}
         disabled={busy || !formId}
       >
         {CATEGORIES.map((item) => (
-          <option key={item.value} value={item.value}>
+          <option
+            key={item.value}
+            value={item.value}
+            disabled={item.value === "COST_ESTIMATE_EXCEL" && !excelUploadsAllowed}
+          >
             {item.label}
           </option>
         ))}
       </select>
       <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed bg-muted/20 px-4 py-5 text-center hover:bg-muted/40">
         <span className="rounded-md border bg-background px-3 py-2 text-sm font-medium">Choose Files</span>
-        <span className="text-xs text-muted-foreground">Select one or more documents</span>
+        <span className="text-xs text-muted-foreground">
+          {activeCategory === "COST_ESTIMATE_EXCEL"
+            ? "Excel spreadsheets only (.xls, .xlsx)"
+            : "Select one or more supporting documents"}
+        </span>
         <input
           type="file"
           multiple
           aria-label="Files to upload"
-          accept={limits?.allowedExtensions.map((extension) => `.${extension}`).join(",") ?? ".pdf"}
+          accept={acceptedExtensions.length ? acceptedExtensions.map((extension) => `.${extension}`).join(",") : undefined}
           disabled={busy}
           className="sr-only"
           onChange={(event) => {

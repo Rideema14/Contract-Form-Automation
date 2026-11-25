@@ -35,5 +35,22 @@ Open http://localhost:3000 - it should show "Backend is running".
 `npm run db:generate`, `npm run db:migrate`, `npm run db:studio`, `npm run typecheck`, `npm test`, `npm run build`.
 Never run `prisma migrate reset` on a shared or production database.
 
+## Provision a local reviewer account
+Public registration is disabled. To create a local test reviewer, set `TEST_USER_EMAIL`,
+`TEST_USER_PASSWORD` (8–128 characters), and `TEST_USER_ROLE=APPROVER` in `backend/.env`,
+then run `npm run create:test-user` from `backend/`. The script only runs in development and
+requires the local `contract_automation` database. `TEST_USER_ROLE` can also be omitted
+(defaults to `SUBMITTER`); `ADMIN` is not available through this script. Existing accounts
+are left unchanged.
+
+## Optional demo login cards
+The login page includes Admin, Approver, and Submitter demo cards. They are disabled by default.
+To enable them, configure `NEXT_PUBLIC_DEMO_LOGIN_ENABLED=true` and the matching
+`NEXT_PUBLIC_DEMO_<ROLE>_EMAIL` and `NEXT_PUBLIC_DEMO_<ROLE>_PASSWORD` values in
+`frontend/.env.local`, using accounts that already exist in a non-production database.
+Because `NEXT_PUBLIC_` values are included in browser code, these credentials are visible to
+all visitors. Use disposable demo accounts only; never use production users or passwords.
+Restart or rebuild the frontend after changing these values.
+
 ## Troubleshooting
 See the README troubleshooting table.

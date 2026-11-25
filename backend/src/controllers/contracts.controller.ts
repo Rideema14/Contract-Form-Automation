@@ -24,6 +24,10 @@ import * as contractService from '../services/contract.service';
 import { AppError } from '../utils/app-error';
 import { sendSuccess } from '../utils/response';
 import { deleteContractAttachments } from '../modules/documents/documents.runtime';
+import {
+  createCostEstimateTemplate,
+  parseCostEstimateWorkbook,
+} from '../services/cost-estimate-excel.service';
 
 function parse<T>(result: {
   success: boolean;
@@ -483,6 +487,44 @@ export async function getCostEstimate(req: Request, res: Response, next: NextFun
     const { formId } = parse(costLineParamsSchema.pick({ formId: true }).safeParse(req.params));
     sendSuccess(req, res, 200, 'Cost estimate retrieved', await contractService.getCostEstimate(formId, user(req)));
   } catch (error) { next(error); }
+}
+
+export async function downloadCostEstimateTemplate(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    const template = await createCostEstimateTemplate();
+    res
+      .status(200)
+      .type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .attachment('cost-estimate-template.xlsx')
+      .send(template);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function importCostEstimate(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    const { formId } = parse(
+      costLineParamsSchema.pick({ formId: true }).safeParse(req.params),
+    );
+    if (!req.file) {
+      throw new AppError(400, 'INVALID_COST_ESTIMATE', 'Choose an .xlsx file to import.');
+    }
+
+    const rows = await parseCostEstimateWorkbook(req.file.buffer);
+    const items = await contractService.importCostLines(formId, user(req), rows);
+    sendSuccess(req, res, 201, 'Cost estimate imported', { items });
+  } catch (error) {
+    next(error);
+  }
 }
 
 export async function listEvaluations(req: Request, res: Response, next: NextFunction) {

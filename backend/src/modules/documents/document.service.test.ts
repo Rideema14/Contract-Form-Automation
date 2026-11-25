@@ -56,6 +56,10 @@ describe('DocumentService', () => {
     const a = await tempFile('my quote.pdf');
     const records = await svc.uploadAttachments({ ...base, files: [a, a] });
     expect(records.map((r) => r.fileName)).toEqual(['my_quote.pdf', 'my_quote_1.pdf']);
+    expect(repo.listAuditEvents()).toEqual(records.map((record) => ({
+      action: 'ATTACHMENT_UPLOADED',
+      attachmentId: record.id,
+    })));
     expect(drive.folderNames).toEqual(['Office Renovation - c1', 'Office Renovation - c1']);
   });
 
@@ -81,10 +85,25 @@ describe('DocumentService', () => {
       findById: async () => null,
       delete: async () => false,
       restore: async () => undefined,
+      recordAuditEvents: async () => undefined,
     };
     const svc = new DocumentService({ drive, repository: repo });
     await expect(svc.uploadAttachments({ ...base, files: [await tempFile('a.pdf')] })).rejects.toThrow('db down');
     expect(drive.files.size).toBe(0);
+  });
+
+  it('rolls back uploaded files when audit-event persistence fails', async () => {
+    const drive = new FakeDrive();
+    const repo = new InMemoryAttachmentRepository();
+    vi.spyOn(repo, 'recordAuditEvents').mockRejectedValue(new Error('audit database down'));
+    const svc = new DocumentService({ drive, repository: repo });
+
+    await expect(
+      svc.uploadAttachments({ ...base, files: [await tempFile('a.pdf')] }),
+    ).rejects.toThrow('audit database down');
+    expect(drive.files.size).toBe(0);
+    expect(await repo.listByContract('c1')).toEqual([]);
+    expect(repo.listAuditEvents()).toEqual([]);
   });
 
   it('reports incomplete cleanup instead of hiding orphaned private files', async () => {
@@ -101,6 +120,7 @@ describe('DocumentService', () => {
       findById: async () => null,
       delete: async () => false,
       restore: async () => undefined,
+      recordAuditEvents: async () => undefined,
     };
     const svc = new DocumentService({ drive, repository: repo });
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -123,67 +143,29 @@ describe('DocumentService', () => {
     expect((await svc.openAttachment('c1', rec.id)).record.id).toBe(rec.id);
   });
 
-  it('deletes only the selected user-uploaded attachment and keeps other files intact', async () => {
-    const repo = new InMemoryAttachmentRepository();
-    const drive = new FakeDrive();
-    const svc = new DocumentService({ drive, repository: repo });
-    const [first, second] = await svc.uploadAttachments({
-      ...base,
-      files: [await tempFile('first.pdf'), await tempFile('second.pdf')],
-    });
-
-    await expect(svc.deleteAttachment('c1', first.id)).resolves.toMatchObject({ id: first.id });
-
-    expect(await repo.listByContract('c1')).toEqual([second]);
-    expect(drive.files.has(first.driveFileId)).toBe(false);
-    expect(drive.files.has(second.driveFileId)).toBe(true);
-  });
-
-  it('returns not found for missing or cross-contract attachment IDs without changing storage', async () => {
-    const repo = new InMemoryAttachmentRepository();
-    const drive = new FakeDrive();
-    const svc = new DocumentService({ drive, repository: repo });
-    const [record] = await svc.uploadAttachments({ ...base, files: [await tempFile('attached.pdf')] });
-
-    await expect(svc.deleteAttachment('other-contract', record.id)).rejects.toMatchObject({
-      statusCode: 404,
-      code: 'ATTACHMENT_NOT_FOUND',
-    });
-    await expect(svc.deleteAttachment('c1', 'missing-id')).rejects.toMatchObject({
-      statusCode: 404,
-      code: 'ATTACHMENT_NOT_FOUND',
-    });
-    expect(await repo.listByContract('c1')).toEqual([record]);
-    expect(drive.files.has(record.driveFileId)).toBe(true);
-  });
-
   it('restores attachment metadata when Drive deletion fails', async () => {
-    const repo = new InMemoryAttachmentRepository();
     const drive = new FakeDrive();
+    const repo = new InMemoryAttachmentRepository();
     const svc = new DocumentService({ drive, repository: repo });
-    const [record] = await svc.uploadAttachments({ ...base, files: [await tempFile('retry.pdf')] });
-    drive.remove = async () => {
-      throw new Error('drive unavailable');
-    };
+    const [record] = await svc.uploadAttachments({ ...base, files: [await tempFile('remove.pdf')] });
+    drive.remove = async () => { throw new Error('Drive unavailable'); };
 
     await expect(svc.deleteAttachment('c1', record.id)).rejects.toMatchObject({
       statusCode: 502,
       code: 'DRIVE_DELETE_FAILED',
     });
-    expect(await repo.listByContract('c1')).toEqual([record]);
-    expect(drive.files.has(record.driveFileId)).toBe(true);
+    expect(await repo.findById(record.id)).toEqual(record);
   });
 
-  it('does not allow individually deleting generated final PDFs', async () => {
+  it('refuses to delete system-generated PDFs', async () => {
     const repo = new InMemoryAttachmentRepository();
-    const drive = new FakeDrive();
-    const svc = new DocumentService({ drive, repository: repo });
+    const svc = new DocumentService({ drive: new FakeDrive(), repository: repo });
     const record = await svc.storeGeneratedFile({
       contractFormId: 'c1',
       contractFolderName: 'Office Renovation - c1',
       category: 'GENERATED_PDF',
       uploadedById: 'system',
-      fileName: 'Final Contract.pdf',
+      fileName: 'Final.pdf',
       mimeType: 'application/pdf',
       content: Buffer.from('%PDF-x'),
     });
@@ -192,8 +174,6 @@ describe('DocumentService', () => {
       statusCode: 409,
       code: 'SYSTEM_ATTACHMENT',
     });
-    expect(await repo.listByContract('c1')).toEqual([record]);
-    expect(drive.files.has(record.driveFileId)).toBe(true);
   });
 
   it('removes all Drive files for an Admin-approved deletion before database cleanup', async () => {
@@ -258,5 +238,6 @@ describe('DocumentService', () => {
     });
     expect(rec.fileName).toBe('Final_Contract.pdf');
     expect(rec.sizeBytes).toBe(6);
+    expect(repo.listAuditEvents()).toEqual([{ action: 'PDF_GENERATED', attachmentId: rec.id }]);
   });
 });

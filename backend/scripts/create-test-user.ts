@@ -92,6 +92,11 @@ async function main(): Promise<void> {
     throw new SafeSetupError('TEST_USER_PASSWORD must be between 8 and 128 characters.');
   }
 
+  const role = process.env.TEST_USER_ROLE ?? UserRole.SUBMITTER;
+  if (role !== UserRole.SUBMITTER && role !== UserRole.APPROVER) {
+    throw new SafeSetupError('TEST_USER_ROLE must be SUBMITTER or APPROVER.');
+  }
+
   const prisma = new PrismaClient({
     datasources: { db: { url: databaseUrl } },
   });
@@ -117,22 +122,22 @@ async function main(): Promise<void> {
 
       const existingUser = await tx.user.findUnique({ where: { email } });
       if (existingUser) {
-        console.log('The local test user already exists; no changes were made.');
+        console.log(`The local test user already exists with role ${existingUser.role}; no changes were made.`);
         return;
       }
 
       const passwordHash = await bcrypt.hash(password, 12);
       await tx.user.create({
         data: {
-          fullName: 'Local Test Submitter',
+          fullName: `Local Test ${role === UserRole.APPROVER ? 'Approver' : 'Submitter'}`,
           email,
           passwordHash,
-          role: UserRole.SUBMITTER,
+          role,
           isActive: true,
         },
       });
 
-      console.log('Local Submitter test user created.');
+      console.log(`Local ${role} test user created.`);
     });
   } finally {
     await prisma.$disconnect();

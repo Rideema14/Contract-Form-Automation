@@ -12,8 +12,9 @@ const source: FinalPdfSource = {
     scope: 'Supply 10 chairs',
     procurementRationale: 'Replace old chairs',
     selectionRationale: 'Lowest compliant bid',
-    contractAmount: d('1200.5000'),
     budgetProvision: d('1500.0000'),
+    contractAmount: d('1200.5000'),
+    taxAmount: d('50.2500'),
     submittedAt: new Date('2026-11-01T10:00:00Z'),
     createdAt: new Date('2026-10-25T10:00:00Z'),
     updatedAt: new Date('2026-11-05T09:30:00Z'),
@@ -82,7 +83,8 @@ describe('final contract PDF', () => {
 
   it('uses decimal-safe totals and shows the approval history', () => {
     const json = JSON.stringify(buildDocDefinition(source).content);
-    expect(json).toContain('Total: 1200.50 USD'); // 1000.00 + 200.50 added exactly
+    expect(json).toContain('Budget provision');
+    expect(json).toContain('Total including tax: 1250.75 USD');
     expect(json).toContain('Ann Approver');
     expect(json).toContain('2026-11-05 09:30 UTC');
   });

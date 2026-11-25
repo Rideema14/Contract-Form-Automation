@@ -20,8 +20,9 @@ export interface FinalPdfSource {
     scope: string | null;
     procurementRationale: string | null;
     selectionRationale: string | null;
-    contractAmount: Dec | null;
     budgetProvision: Dec | null;
+    contractAmount: Dec | null;
+    taxAmount: Dec;
     submittedAt: Date | null;
     createdAt: Date;
     updatedAt: Date;
@@ -151,6 +152,10 @@ export function buildDocDefinition(src: FinalPdfSource): TDocumentDefinitions {
   const decisions = [...history.decisions].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   const auditLogs = [...(form.auditLogs ?? [])].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   const costTotal = sumMoney(form.costLines.map((line) => line.amount.toString()));
+  const totalWithTax = sumMoney([
+    ...form.costLines.map((line) => line.amount.toString()),
+    form.taxAmount.toString(),
+  ]);
   const additionalSections = form.formSchemaVersion?.definition.sections ?? [];
   const dynamicValues = form.dynamicValues ?? {};
 
@@ -215,8 +220,8 @@ export function buildDocDefinition(src: FinalPdfSource): TDocumentDefinitions {
       table(
         ['Field', 'Value'],
         [
-          ['Contract amount', `${money(form.contractAmount)} ${currency}`.trim()],
           ['Budget provision', `${money(form.budgetProvision)} ${currency}`.trim()],
+          ['Estimated contract amount', `${money(form.contractAmount)} ${currency}`.trim()],
         ],
         ['35%', '*'],
       ),
@@ -232,7 +237,12 @@ export function buildDocDefinition(src: FinalPdfSource): TDocumentDefinitions {
         ]),
         ['*', 'auto', 'auto', 'auto'],
       ),
-      { text: `Total: ${costTotal} ${currency}`.trim(), bold: true, alignment: 'right', margin: [0, 0, 0, 6] },
+      {
+        text: `Subtotal: ${costTotal} ${currency}\nTax amount: ${money(form.taxAmount)} ${currency}\nTotal including tax: ${totalWithTax} ${currency}`.trim(),
+        bold: true,
+        alignment: 'right',
+        margin: [0, 0, 0, 6],
+      },
 
       heading('8. Bidders and Quotations'),
       table(

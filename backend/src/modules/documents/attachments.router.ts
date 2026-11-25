@@ -29,6 +29,10 @@ export interface AttachmentsRouterDeps {
   upload: RequestHandler;
   /** Optional: generate and return the approved contract package. */
   generatePackage?(formId: string, user: AccessUser): Promise<FinalPdfPackage>;
+  /** Optional: render a current contract snapshot without storing it. */
+  generateCurrentPdf?(formId: string, user: AccessUser): Promise<FinalPdfPackage>;
+  /** Optional: generate or retrieve the stored approved PDF attachment. */
+  generateFinalPdfAttachment?(formId: string, user: AccessUser): Promise<AttachmentRecord>;
 }
 
 const formParams = z.object({ formId: z.string().uuid() }).strict();
@@ -85,6 +89,8 @@ function contentDisposition(type: 'attachment' | 'inline', fileName: string): st
  *   DELETE /:formId/attachments/:attachmentId
  *   GET  /:formId/attachments/:attachmentId/download
  *   GET  /:formId/attachments/:attachmentId/view
+ *   GET  /:formId/pdf                              current contract PDF snapshot
+ *   POST /:formId/final-pdf/generate              generate/retrieve approved PDF
  *   POST /:formId/final-pdf                          ADMIN or assigned APPROVER
  */
 export function createAttachmentsRouter(deps: AttachmentsRouterDeps): Router {
@@ -189,6 +195,36 @@ export function createAttachmentsRouter(deps: AttachmentsRouterDeps): Router {
 
   router.get('/:formId/attachments/:attachmentId/download', authenticate, guard(assertCanView), send('download'));
   router.get('/:formId/attachments/:attachmentId/view', authenticate, guard(assertCanView), send('view'));
+
+  const generateCurrentPdf = deps.generateCurrentPdf;
+  if (generateCurrentPdf) {
+    router.get('/:formId/pdf', authenticate, guard(assertCanView), async (req, res) => {
+      const { formId } = parse(formParams, req.params, 'Invalid contract form ID');
+      const file = await generateCurrentPdf(formId, currentUser(req));
+      res
+        .status(200)
+        .setHeader('Content-Type', 'application/pdf')
+        .setHeader('Content-Disposition', contentDisposition('attachment', file.fileName))
+        .setHeader('Content-Length', String(file.content.length))
+        .setHeader('X-Content-Type-Options', 'nosniff')
+        .setHeader('Cache-Control', 'private, no-store')
+        .send(file.content);
+    });
+  }
+
+  const generateFinalPdfAttachment = deps.generateFinalPdfAttachment;
+  if (generateFinalPdfAttachment) {
+    router.post('/:formId/final-pdf/generate', authenticate, async (req, res) => {
+      const user = currentUser(req);
+      if (!['ADMIN', 'APPROVER', 'SUBMITTER'].includes(user.role)) {
+        throw new AppError(403, 'FORBIDDEN', 'You are not allowed to generate the final PDF');
+      }
+      const { formId } = parse(formParams, req.params, 'Invalid contract form ID');
+      await assertCanView(formId, user);
+      const attachment = await generateFinalPdfAttachment(formId, user);
+      sendSuccess(req, res, 200, 'Final PDF generated', toPublicAttachment(attachment));
+    });
+  }
 
   if (deps.generatePackage) {
     const generatePackage = deps.generatePackage;

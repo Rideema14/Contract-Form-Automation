@@ -14,6 +14,8 @@ import { createAttachmentsRouter } from '../modules/documents/attachments.router
 import {
   assertCanViewAttachments,
   documentService,
+  generateCurrentContractPdf,
+  generateFinalPdfAttachment,
   generateFinalPdfPackage,
 } from '../modules/documents/documents.runtime';
 import { buildContractDriveFolderName } from '../modules/documents/file.utils';
@@ -103,6 +105,8 @@ router.use(
     },
     upload: configuredDocumentUpload,
     generatePackage: (formId, user) => generateFinalPdfPackage(formId, user),
+    generateCurrentPdf: (formId, user) => generateCurrentContractPdf(formId, user),
+    generateFinalPdfAttachment: (formId, user) => generateFinalPdfAttachment(formId, user),
   }),
 );
 

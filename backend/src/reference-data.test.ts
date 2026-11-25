@@ -12,6 +12,13 @@ afterEach(() => {
 });
 
 describe('reference data access', () => {
+  function mockAuditTransaction() {
+    vi.spyOn(prisma, '$transaction').mockImplementation(
+      async (callback) => callback(prisma as never) as never,
+    );
+    return vi.spyOn(prisma.auditLog, 'create').mockResolvedValue({ id: 'audit-1' } as never);
+  }
+
   function adminCookie() {
     vi.spyOn(prisma.user, 'findUnique').mockResolvedValue({
       id: 'admin-1',
@@ -70,6 +77,7 @@ describe('reference data access', () => {
 
   it('creates vendors from structured contact fields and keeps the selected type relationship', async () => {
     const cookie = adminCookie();
+    const auditCreate = mockAuditTransaction();
     const vendorTypeId = '550e8400-e29b-41d4-a716-446655440001';
     const contactDetails = {
       contactPerson: 'A. Person',
@@ -104,10 +112,20 @@ describe('reference data access', () => {
       data: { name: 'Acme Systems', vendorTypeId, contactDetails },
       select: { id: true, name: true, vendorType: { select: { id: true, name: true } }, contactDetails: true },
     });
+    expect(auditCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        actorId: 'admin-1',
+        action: 'REFERENCE_DATA_CREATED',
+        entityType: 'ReferenceData',
+        entityId: 'vendor-1',
+        details: { category: 'vendors', name: 'Acme Systems', vendorTypeId },
+      }),
+    });
   });
 
   it('updates a vendor in place with its existing ID and vendor type relationship', async () => {
     const cookie = adminCookie();
+    const auditCreate = mockAuditTransaction();
     const vendorTypeId = '550e8400-e29b-41d4-a716-446655440001';
     const id = '550e8400-e29b-41d4-a716-446655440002';
     const contactDetails = {
@@ -140,6 +158,39 @@ describe('reference data access', () => {
       where: { id },
       data: { name: 'Updated Company', vendorTypeId, contactDetails },
       select: { id: true, name: true, vendorType: { select: { id: true, name: true } }, contactDetails: true },
+    });
+    expect(auditCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        actorId: 'admin-1',
+        action: 'REFERENCE_DATA_UPDATED',
+        entityType: 'ReferenceData',
+        entityId: id,
+        details: { category: 'vendors', changedFields: ['contactDetails', 'name', 'vendorTypeId'] },
+      }),
+    });
+  });
+
+  it('records reference-data deletion with the deletion transaction', async () => {
+    const cookie = adminCookie();
+    const auditCreate = mockAuditTransaction();
+    vi.spyOn(prisma.user, 'count').mockResolvedValue(0);
+    vi.spyOn(prisma.contractForm, 'count').mockResolvedValue(0);
+    const remove = vi.spyOn(prisma.department, 'delete').mockResolvedValue({ id: 'depart-1' } as never);
+
+    const response = await request(app)
+      .delete('/api/reference-data/departments/depart-1')
+      .set('Cookie', cookie);
+
+    expect(response.status).toBe(200);
+    expect(remove).toHaveBeenCalledWith({ where: { id: 'depart-1' } });
+    expect(auditCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        actorId: 'admin-1',
+        action: 'REFERENCE_DATA_DELETED',
+        entityType: 'ReferenceData',
+        entityId: 'depart-1',
+        details: { category: 'departments' },
+      }),
     });
   });
 

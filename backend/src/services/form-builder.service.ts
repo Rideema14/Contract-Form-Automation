@@ -7,6 +7,7 @@ import {
   formSchemaDefinitionSchema,
 } from '../schemas/form-builder.schema';
 import { AppError } from '../utils/app-error';
+import { recordAuditEvent } from './audit.service';
 
 const draftId = 'active';
 
@@ -150,16 +151,29 @@ export async function getFormSchemaDraft() {
   };
 }
 
-export async function saveFormSchemaDraft(value: unknown) {
+export async function saveFormSchemaDraft(value: unknown, actorId: string) {
   const definition = formSchemaDefinitionSchema.parse(value);
-  return prisma.formSchemaDraft.upsert({
-    where: { id: draftId },
-    create: { id: draftId, definition: definition as Prisma.InputJsonValue },
-    update: { definition: definition as Prisma.InputJsonValue },
+  return prisma.$transaction(async (tx) => {
+    const saved = await tx.formSchemaDraft.upsert({
+      where: { id: draftId },
+      create: { id: draftId, definition: definition as Prisma.InputJsonValue },
+      update: { definition: definition as Prisma.InputJsonValue },
+    });
+    await recordAuditEvent(tx, {
+      actorId,
+      action: 'FORM_SCHEMA_DRAFT_SAVED',
+      entityType: 'FormSchemaDraft',
+      entityId: saved.id,
+      details: {
+        sectionCount: definition.sections.length,
+        fieldCount: definition.sections.reduce((count, section) => count + section.fields.length, 0),
+      },
+    });
+    return saved;
   });
 }
 
-export async function publishFormSchema() {
+export async function publishFormSchema(actorId: string) {
   return prisma.$transaction(async (tx) => {
     const latest = await tx.formSchemaVersion.findFirst({ orderBy: { version: 'desc' } });
     if (!latest) {
@@ -177,6 +191,13 @@ export async function publishFormSchema() {
       where: { id: draftId },
       create: { id: draftId, definition: definition as Prisma.InputJsonValue },
       update: { definition: definition as Prisma.InputJsonValue },
+    });
+    await recordAuditEvent(tx, {
+      actorId,
+      action: 'FORM_SCHEMA_PUBLISHED',
+      entityType: 'FormSchemaVersion',
+      entityId: version.id,
+      details: { version: version.version },
     });
     return { ...version, definition };
   });

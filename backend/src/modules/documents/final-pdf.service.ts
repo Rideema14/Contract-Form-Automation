@@ -143,6 +143,30 @@ export function createFinalPdfService(deps: FinalPdfServiceDeps) {
     };
   }
 
+  async function generateCurrentPdf(formId: string, actor: FinalPdfActor): Promise<FinalPdfPackage> {
+    const form = await deps.loadForm(formId, actor);
+    const history = await deps.loadHistory(formId, actor);
+    const content = await (deps.generate ?? generateFinalContractPdf)({
+      form,
+      history,
+      generatedAt: (deps.now ?? (() => new Date()))(),
+    });
+
+    return {
+      fileName: sanitizeFilename(`${form.referenceNo ?? form.id} - Current.pdf`),
+      content,
+    };
+  }
+
+  async function generateFinalPdfAttachment(formId: string, actor: FinalPdfActor): Promise<AttachmentRecord> {
+    const form = await deps.loadForm(formId, actor);
+    if (form.status !== 'APPROVED') {
+      throw new AppError(409, 'FORM_NOT_APPROVED', 'The final PDF can only be generated for approved forms');
+    }
+
+    return generateAndStoreFinalPdf(formId, actor, form);
+  }
+
   function generateAndStoreFinalPdf(
     formId: string,
     actor: FinalPdfActor,
@@ -158,6 +182,8 @@ export function createFinalPdfService(deps: FinalPdfServiceDeps) {
 
   return {
     generateAndStoreFinalPdf,
+    generateCurrentPdf,
+    generateFinalPdfAttachment,
     generatePackage,
   };
 }

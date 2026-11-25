@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Request, Router } from 'express';
 import authenticate from '../middleware/authenticate';
 import { requireRoles } from '../middleware/authorize';
 import { listActiveApprovers } from '../controllers/approvers.controller';
@@ -8,6 +8,7 @@ import { UserRole } from '@prisma/client';
 import { sendSuccess } from '../utils/response';
 import { AppError } from '../utils/app-error';
 import { z } from 'zod';
+import { recordAuditEvent } from '../services/audit.service';
 
 const router = Router();
 
@@ -34,6 +35,13 @@ function parseUserInput<T>(schema: z.ZodType<T>, input: unknown): T {
   return parsed.data;
 }
 
+function getActorId(req: Request): string {
+  if (!req.authUser) {
+    throw new AppError(401, 'AUTHENTICATION_REQUIRED', 'Authentication required');
+  }
+  return req.authUser.id;
+}
+
 router.use(authenticate);
 
 // GET /users/approvers
@@ -55,10 +63,21 @@ router.post('/', requireRoles(UserRole.ADMIN), async (req, res, next) => {
   try {
     const { fullName, email, password, role = 'SUBMITTER', departmentId = null } =
       parseUserInput(createUserSchema, req.body);
+    const actorId = getActorId(req);
     const passwordHash = await bcrypt.hash(password, 12);
-    const user = await prisma.user.create({
-      data: { fullName, email, passwordHash, role, departmentId },
-      select: { id: true, fullName: true, email: true, role: true, isActive: true, departmentId: true, createdAt: true },
+    const user = await prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: { fullName, email, passwordHash, role, departmentId },
+        select: { id: true, fullName: true, email: true, role: true, isActive: true, departmentId: true, createdAt: true },
+      });
+      await recordAuditEvent(tx, {
+        actorId,
+        action: 'USER_CREATED',
+        entityType: 'User',
+        entityId: created.id,
+        details: { role: created.role, departmentId: created.departmentId },
+      });
+      return created;
     });
     sendSuccess(req, res, 201, 'User created', user);
   } catch (error) {
@@ -74,15 +93,44 @@ router.patch('/:id', requireRoles(UserRole.ADMIN), async (req, res, next) => {
     }
     const { role, isActive, departmentId, fullName } =
       parseUserInput(updateUserSchema, req.body);
-    const user = await prisma.user.update({
-      where: { id },
-      data: {
-        ...(role !== undefined ? { role } : {}),
-        ...(isActive !== undefined ? { isActive } : {}),
-        ...(departmentId !== undefined ? { departmentId } : {}),
-        ...(fullName !== undefined ? { fullName: fullName.trim() } : {}),
-      },
-      select: { id: true, fullName: true, email: true, role: true, isActive: true, departmentId: true, createdAt: true },
+    const actorId = getActorId(req);
+    const user = await prisma.$transaction(async (tx) => {
+      const previous = await tx.user.findUnique({
+        where: { id },
+        select: { role: true, isActive: true, departmentId: true, fullName: true },
+      });
+      if (!previous) throw new AppError(404, 'NOT_FOUND', 'User not found');
+
+      const updated = await tx.user.update({
+        where: { id },
+        data: {
+          ...(role !== undefined ? { role } : {}),
+          ...(isActive !== undefined ? { isActive } : {}),
+          ...(departmentId !== undefined ? { departmentId } : {}),
+          ...(fullName !== undefined ? { fullName: fullName.trim() } : {}),
+        },
+        select: { id: true, fullName: true, email: true, role: true, isActive: true, departmentId: true, createdAt: true },
+      });
+      const changedFields = [
+        ...(previous.role !== updated.role ? ['role'] : []),
+        ...(previous.isActive !== updated.isActive ? ['isActive'] : []),
+        ...(previous.departmentId !== updated.departmentId ? ['departmentId'] : []),
+        ...(previous.fullName !== updated.fullName ? ['fullName'] : []),
+      ];
+      await recordAuditEvent(tx, {
+        actorId,
+        action: changedFields.includes('role') ? 'USER_ROLE_CHANGED' : 'USER_UPDATED',
+        entityType: 'User',
+        entityId: id,
+        details: {
+          changedFields,
+          ...(previous.role !== updated.role ? { role: { from: previous.role, to: updated.role } } : {}),
+          ...(previous.isActive !== updated.isActive
+            ? { isActive: { from: previous.isActive, to: updated.isActive } }
+            : {}),
+        },
+      });
+      return updated;
     });
     sendSuccess(req, res, 200, 'User updated', user);
   } catch (error) {

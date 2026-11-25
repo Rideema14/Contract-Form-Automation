@@ -40,12 +40,16 @@ type Props = {
   onChange: (value: CompanyDetails) => void;
   idPrefix: string;
   className?: string;
+  nameSuggestions?: { id: string; name: string }[];
+  onNameChange?: (name: string) => void;
 };
 
-export function CompanyDetailsFields({ value, onChange, idPrefix, className }: Props) {
+export function CompanyDetailsFields({ value, onChange, idPrefix, className, nameSuggestions, onNameChange }: Props) {
   function update<K extends keyof CompanyDetails>(key: K, fieldValue: CompanyDetails[K]) {
     onChange({ ...value, [key]: fieldValue });
   }
+
+  const suggestionsId = `${idPrefix}-suggestions`;
 
   return (
     <div className={className ?? "grid gap-3 md:grid-cols-2"}>
@@ -54,10 +58,20 @@ export function CompanyDetailsFields({ value, onChange, idPrefix, className }: P
         <Input
           id={`${idPrefix}-company-name`}
           value={value.companyName}
-          onChange={(event) => update("companyName", event.target.value)}
+          onChange={(event) => {
+            update("companyName", event.target.value);
+            onNameChange?.(event.target.value);
+          }}
+          list={nameSuggestions?.length ? suggestionsId : undefined}
+          autoComplete="off"
           required
           maxLength={255}
         />
+        {nameSuggestions?.length ? (
+          <datalist id={suggestionsId}>
+            {nameSuggestions.map((vendor) => <option key={vendor.id} value={vendor.name} />)}
+          </datalist>
+        ) : null}
       </div>
       <div className="space-y-2">
         <Label htmlFor={`${idPrefix}-contact-person`}>Contact Person</Label>

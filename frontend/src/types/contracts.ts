@@ -16,8 +16,9 @@ export type Contract = {
   contractCategoryId: string | null;
   scope: string | null;
   procurementRationale: string | null;
-  contractAmount: string | null;
   budgetProvision: string | null;
+  contractAmount: string | null;
+  taxAmount: string;
   currencyId: string | null;
   recommendedVendorId: string | null;
   recommendedBidderId: string | null;
@@ -49,8 +50,9 @@ export type ContractDraft = {
   contractCategoryId?: string | null;
   scope?: string | null;
   procurementRationale?: string | null;
-  contractAmount?: string | null;
   budgetProvision?: string | null;
+  contractAmount?: string | null;
+  taxAmount?: string | null;
   currencyId?: string | null;
   recommendedVendorId?: string | null;
   recommendedBidderId?: string | null;
@@ -172,10 +174,10 @@ export type ApprovalStep = {
   id: string;
   contractFormId?: string;
   approverId?: string;
+  approver?: { id: string; fullName: string; email?: string };
   level: number;
   status: string;
   actedAt: string | null;
-  approver?: { id: string; fullName: string; email: string };
   decisions: ApprovalDecision[];
 };
 

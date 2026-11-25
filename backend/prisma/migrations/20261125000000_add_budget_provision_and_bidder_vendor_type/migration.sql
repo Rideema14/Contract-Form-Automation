@@ -1,6 +1,3 @@
-ALTER TABLE "ContractForm"
-ADD COLUMN "budgetProvision" DECIMAL(19,4);
-
 ALTER TABLE "Bidder"
 ADD COLUMN "vendorTypeId" TEXT;
 

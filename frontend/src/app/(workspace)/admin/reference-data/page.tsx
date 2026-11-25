@@ -222,6 +222,14 @@ export default function AdminReferenceDataPage() {
                 onChange={setVendorDetails}
                 idPrefix="vendor"
                 className="grid gap-4"
+                nameSuggestions={data?.vendors.map((vendor) => ({ id: vendor.id, name: vendor.name })) ?? []}
+                onNameChange={(name) => {
+                  if (editing) return;
+                  const match = data?.vendors.find(
+                    (vendor) => vendor.name.toLowerCase() === name.trim().toLowerCase(),
+                  );
+                  if (match?.vendorType) setVendorTypeId(match.vendorType.id);
+                }}
               />
             ) : activeCategory === "currencies" ? (
               <>

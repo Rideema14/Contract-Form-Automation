@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, LoaderCircle, Plus, Save, Send, Trash2 } from "lucide-react";
+import { ArrowLeft, Download, FileDown, LoaderCircle, Plus, Save, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,15 +22,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { apiErrorMessage } from "@/lib/api-client";
 import {
   createBidder, createContract, createCostLine, createQuotation, deleteBidder,
-  deleteCostLine, deleteQuotation, getContract, getPublishedFormSchema, getReferenceData, saveEvaluations,
+  deleteCostLine, deleteQuotation, downloadCostEstimateTemplate, getContract, getPublishedFormSchema, getReferenceData,
+  importCostEstimate, saveEvaluations,
   submitContract, updateBidder, updateContract, updateCostLine, updateQuotation,
 } from "@/services/contracts";
 import type { Bidder, Contract, ContractDraft, CostLine, DynamicValues, Evaluation, FormSchemaVersion, ReferenceData } from "@/types/contracts";
 import { ApproverSelect } from "@/components/approvals/ApproverSelect";
 import { API_BASE_URL } from "@/lib/api-client";
+import { useAuth } from "@/hooks/useAuth";
 import { AttachmentUploader } from "@/features/attachments/attachment-uploader";
 import { AttachmentList } from "@/features/attachments/attachment-list";
-import { getAttachmentLimits } from "@/features/attachments/attachments-api";
+import { downloadCurrentContractPdf, getAttachmentLimits } from "@/features/attachments/attachments-api";
 import type { UploadLimits } from "@/features/attachments/types";
 import { CompanyDetailsFields, companyContactFields, emptyCompanyDetails, type CompanyDetails } from "@/features/contracts/company-details-fields";
 import { defaultDynamicValues, DynamicFormSections, validateDynamicValues } from "@/features/contracts/dynamic-form-sections";
@@ -43,8 +45,10 @@ type EvalDraft = { bidderId: string; type: "TECHNICAL" | "COMMERCIAL"; score: st
 
 const emptyValues: FormValues = {
   referenceNo: "", title: "", sponsorDepartmentId: "", contractCategoryId: "", scope: "",
-  procurementRationale: "", contractAmount: "", budgetProvision: "", currencyId: "", recommendedVendorId: "", selectionRationale: "",
+  procurementRationale: "", contractAmount: "", currencyId: "", recommendedVendorId: "", selectionRationale: "",
   recommendedBidderId: "",
+  budgetProvision: "",
+  taxAmount: "",
 };
 
 function errorMessage(error: unknown, fallback: string) {
@@ -71,18 +75,30 @@ function costTotal(lines: CostLine[]) {
   return `${digits.slice(0, -4)}.${digits.slice(-4)}`;
 }
 
+function sumMoney(values: string[]) {
+  const scaled = values.reduce((sum, value) => {
+    const normalized = /^\d+(?:\.\d{1,4})?$/.test(value) ? value : "0";
+    const [whole, fraction = ""] = normalized.split(".");
+    return sum + BigInt(whole + fraction.padEnd(4, "0").slice(0, 4));
+  }, BigInt(0));
+  const digits = scaled.toString().padStart(5, "0");
+  return `${digits.slice(0, -4)}.${digits.slice(-4)}`;
+}
+
+function totalWithTax(lines: CostLine[], taxAmount: string) {
+  return sumMoney([costTotal(lines), taxAmount || "0"]);
+}
+
 function contractValues(contract: Contract): FormValues {
   return {
     referenceNo: contract.referenceNo ?? "", title: contract.title ?? "",
     sponsorDepartmentId: contract.sponsorDepartmentId ?? "", contractCategoryId: contract.contractCategoryId ?? "",
     scope: contract.scope ?? "", procurementRationale: contract.procurementRationale ?? "",
-    contractAmount: contract.contractAmount ?? "", budgetProvision: contract.budgetProvision ?? "",
-    currencyId: contract.currencyId ?? "",
-    recommendedVendorId: contract.recommendedVendorId ?? "",
-    recommendedBidderId: contract.recommendedBidderId
-      ?? contract.bidders?.find((bidder) => bidder.vendorId === contract.recommendedVendorId)?.id
-      ?? "",
+    contractAmount: contract.contractAmount ?? "", currencyId: contract.currencyId ?? "",
+    recommendedVendorId: contract.recommendedVendorId ?? "", recommendedBidderId: contract.recommendedBidderId ?? "",
     selectionRationale: contract.selectionRationale ?? "",
+    budgetProvision: contract.budgetProvision ?? "",
+    taxAmount: contract.taxAmount ?? "",
   };
 }
 
@@ -106,12 +122,14 @@ function validate(
   if (!/^\d+(?:\.\d{1,4})?$/.test(values.contractAmount)) errors.contractAmount = "Enter a non-negative amount with up to 4 decimals.";
   if (!/^\d+(?:\.\d{1,4})?$/.test(values.budgetProvision)) errors.budgetProvision = "Enter a non-negative budget provision with up to 4 decimals.";
   if (!values.currencyId) errors.currencyId = "Select a currency.";
-  const recommendedBidder = bidders.find((bidder) => bidder.id === values.recommendedBidderId);
+  const recommendedBidder = bidders.find((bidder) => bidder.id === values.recommendedBidderId)
+    ?? undefined;
   if (!values.recommendedBidderId) {
     errors.recommendedBidderId = "Select the contracting vendor.";
   } else if (!recommendedBidder || !(recommendedBidder.vendorType?.name || recommendedBidder.vendor?.vendorType?.name)) {
     errors.recommendedBidderId = "The contracting vendor must have a vendor type.";
   }
+  if (values.taxAmount && !/^\d+(?:\.\d{1,4})?$/.test(values.taxAmount)) errors.taxAmount = "Enter a non-negative tax amount with up to 4 decimals.";
   if ((values.recommendedVendorId || values.recommendedBidderId) && !values.selectionRationale.trim()) errors.selectionRationale = "Selection rationale is required.";
   if (!bidders.length) errors.bidders = "Bidder Management: add at least one bidder.";
   for (const bidder of bidders) {
@@ -156,6 +174,40 @@ function ReadOnlyField({ label, value, wide = false }: { label: string; value: R
   );
 }
 
+function CurrentPdfDownloadButton({
+  formId,
+  referenceNo,
+  disabled = false,
+}: {
+  formId: string;
+  referenceNo: string | null;
+  disabled?: boolean;
+}) {
+  const [downloading, setDownloading] = useState(false);
+
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      disabled={disabled || downloading}
+      onClick={async () => {
+        setDownloading(true);
+        try {
+          await downloadCurrentContractPdf(formId, referenceNo);
+          toast.success("Current contract PDF downloaded.");
+        } catch (caught) {
+          toast.error(errorMessage(caught, "Could not download contract PDF."));
+        } finally {
+          setDownloading(false);
+        }
+      }}
+    >
+      {downloading ? <LoaderCircle className="animate-spin" /> : <FileDown />}
+      Download PDF
+    </Button>
+  );
+}
+
 function ReadOnlyContractForm({
   contract,
   values,
@@ -173,27 +225,25 @@ function ReadOnlyContractForm({
   approverIds: string[];
   returnTo: string;
 }) {
+  const { authUser } = useAuth();
   const recommendedBidder = bidders.find((bidder) => bidder.id === values.recommendedBidderId)
     ?? contract.recommendedBidder;
   const currency = refs?.currencies.find((item) => item.id === values.currencyId)
     ?? contract.currency;
-  const contractAmountDisplay = currency
-    ? `${currency.code} ${values.contractAmount || "—"}`
-    : values.contractAmount || "—";
-  const budgetProvisionDisplay = currency
-    ? `${currency.code} ${values.budgetProvision || "—"}`
-    : values.budgetProvision || "—";
 
   return (
     <main className="min-h-screen bg-muted/30 p-4 sm:p-8">
       <div className="mx-auto flex max-w-6xl flex-col gap-6">
-        <header>
-          <Link href={returnTo} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="size-4" />Back
-          </Link>
-          <h1 className="mt-2 text-2xl font-bold sm:text-3xl">{contract.title || "Untitled contract"}</h1>
-          <p className="text-sm text-muted-foreground">{contract.referenceNo || "No reference number"}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Read-only contract form</p>
+        <header className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <Link href={returnTo} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+              <ArrowLeft className="size-4" />Back
+            </Link>
+            <h1 className="mt-2 text-2xl font-bold sm:text-3xl">{contract.title || "Untitled contract"}</h1>
+            <p className="text-sm text-muted-foreground">{contract.referenceNo || "No reference number"}</p>
+            <p className="mt-1 text-xs text-muted-foreground">Read-only contract form</p>
+          </div>
+          {authUser && <CurrentPdfDownloadButton formId={contract.id} referenceNo={contract.referenceNo} />}
         </header>
 
         <Card>
@@ -207,7 +257,7 @@ function ReadOnlyContractForm({
         <Card>
           <CardHeader><CardTitle>Project Description</CardTitle></CardHeader>
           <CardContent>
-            <ReadOnlyField label="Contract Description / Scope of Work" value={values.scope} wide />
+            <ReadOnlyField label="Scope of work" value={values.scope} wide />
           </CardContent>
         </Card>
 
@@ -216,7 +266,7 @@ function ReadOnlyContractForm({
           <CardContent className="grid gap-4 md:grid-cols-2">
             <ReadOnlyField label="Sponsor department" value={refs?.departments.find((item) => item.id === values.sponsorDepartmentId)?.name} />
             <ReadOnlyField label="Contract category" value={refs?.categories.find((item) => item.id === values.contractCategoryId)?.name} />
-            <ReadOnlyField label="Business Justification / Procurement Rationale" value={values.procurementRationale} wide />
+            <ReadOnlyField label="Sourcing / procurement rationale" value={values.procurementRationale} wide />
           </CardContent>
         </Card>
 
@@ -229,7 +279,6 @@ function ReadOnlyContractForm({
                   <div className="min-w-0">
                     <p className="break-words font-semibold">{bidder.companyName || bidder.vendor?.name || "Unnamed bidder"}</p>
                     <p className="text-xs text-muted-foreground">Bidder {bidder.sortOrder + 1}</p>
-                    <p className="text-xs text-muted-foreground">Vendor type: {bidder.vendorType?.name ?? bidder.vendor?.vendorType?.name ?? "—"}</p>
                   </div>
                 </div>
                 <div className="mt-3 grid gap-4 md:grid-cols-2">
@@ -246,11 +295,9 @@ function ReadOnlyContractForm({
         <Card>
           <CardHeader><CardTitle>Financial and Vendor Information</CardTitle></CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2">
-            <ReadOnlyField label="Estimated contract amount" value={contractAmountDisplay} />
-            <ReadOnlyField label="Budget provision" value={budgetProvisionDisplay} />
+            <ReadOnlyField label="Estimated contract amount" value={values.contractAmount} />
             <ReadOnlyField label="Currency" value={currency ? `${currency.code} - ${currency.name}` : undefined} />
             <ReadOnlyField label="Recommended bidder" value={recommendedBidder?.companyName || recommendedBidder?.vendor?.name || contract.recommendedVendor?.name} />
-            <ReadOnlyField label="Vendor type" value={recommendedBidder?.vendorType?.name ?? recommendedBidder?.vendor?.vendorType?.name ?? contract.recommendedVendor?.vendorType?.name} />
             <ReadOnlyField label="Selection rationale" value={values.selectionRationale} wide />
           </CardContent>
         </Card>
@@ -309,7 +356,7 @@ function ReadOnlyContractForm({
         <Card>
           <CardHeader><CardTitle>Budget and Cost Information</CardTitle></CardHeader>
           <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">Tax is not configured; tax is 0.00.</p>
+            <ReadOnlyField label="Budget provision" value={values.budgetProvision} />
             {costLines.length === 0 ? <p className="text-sm text-muted-foreground">No cost lines recorded.</p> : (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[36rem] text-sm">
@@ -319,7 +366,7 @@ function ReadOnlyContractForm({
               </div>
             )}
             <div className="flex flex-wrap justify-end gap-x-6 gap-y-1 border-t pt-3 text-sm">
-              <span>Subtotal: {currency?.code ?? ""} {costTotal(costLines)}</span><span>Tax: 0.0000</span><strong>Total: {currency?.code ?? ""} {costTotal(costLines)}</strong>
+              <span>Subtotal: {costTotal(costLines)}</span><span>Tax: {values.taxAmount}</span><strong>Total: {totalWithTax(costLines, values.taxAmount)}</strong>
             </div>
           </CardContent>
         </Card>
@@ -341,6 +388,7 @@ function ReadOnlyContractForm({
 
 export function ContractEditor({ contractId, edit = true, readOnly = false, returnTo = "/contracts" }: Props) {
   const router = useRouter();
+  const { authUser } = useAuth();
   const [values, setValues] = useState<FormValues>(emptyValues);
   const [activeContractId, setActiveContractId] = useState<string | undefined>(contractId);
   const [contract, setContract] = useState<Contract | null>(null);
@@ -351,7 +399,7 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
   const [newVendor, setNewVendor] = useState("");
   const [companySelection, setCompanySelection] = useState("");
   const [newCompany, setNewCompany] = useState<CompanyDetails>(emptyCompanyDetails);
-  const [newCompanyVendorTypeId, setNewCompanyVendorTypeId] = useState("");
+  const [newVendorTypeId, setNewVendorTypeId] = useState("");
   const [quotationDrafts, setQuotationDrafts] = useState<Record<string, QuotationDraft>>({});
   const [costLines, setCostLines] = useState<CostLine[]>([]);
   const [costDraft, setCostDraft] = useState<CostDraft>({ description: "", quantity: "", unitCost: "", amount: "" });
@@ -365,6 +413,8 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
   const [submitReviewOpen, setSubmitReviewOpen] = useState(false);
   const [attachmentLimits, setAttachmentLimits] = useState<UploadLimits | null>(null);
   const [attachmentRefresh, setAttachmentRefresh] = useState(0);
+  const [importingCostEstimate, setImportingCostEstimate] = useState(false);
+  const costEstimateFileRef = useRef<HTMLInputElement>(null);
   const [attachmentsUploading, setAttachmentsUploading] = useState(false);
   const [preDraftUploadsPending, setPreDraftUploadsPending] = useState(false);
   const preDraftUploadsPendingRef = useRef(false);
@@ -387,8 +437,8 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
     Boolean(values.scope.trim()),
     Boolean(values.sponsorDepartmentId && values.contractCategoryId && values.procurementRationale.trim()),
     bidders.length > 0,
-    Boolean(values.contractAmount && values.currencyId && values.budgetProvision && values.recommendedBidderId),
-    costLines.length > 0,
+    Boolean(values.contractAmount && values.currencyId),
+    Boolean(values.budgetProvision && costLines.length > 0),
     approverIds.length > 0,
     Boolean(activeContractId),
   ], [values, bidders.length, costLines.length, approverIds.length, activeContractId]);
@@ -411,6 +461,7 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
     ])
       .then(([referenceData, loaded, publishedSchema]) => {
         setRefs(referenceData);
+        setNewVendorTypeId(referenceData.vendorTypes[0]?.id ?? "");
         if (loaded) {
           if (!loaded.formSchemaVersion) {
             throw new Error("This contract's original form configuration is unavailable.");
@@ -474,12 +525,13 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
       contractCategoryId: currentValues.contractCategoryId || null,
       scope: currentValues.scope.trim() || null,
       procurementRationale: currentValues.procurementRationale.trim() || null,
+      budgetProvision: currentValues.budgetProvision.trim() || null,
       contractAmount: currentValues.contractAmount.trim() || null,
+      taxAmount: currentValues.taxAmount.trim() || null,
       currencyId: currentValues.currencyId || null,
       recommendedVendorId: currentValues.recommendedVendorId || null,
       selectionRationale: currentValues.selectionRationale.trim() || null,
       recommendedBidderId: currentValues.recommendedBidderId || null,
-      budgetProvision: currentValues.budgetProvision.trim() || null,
       dynamicValues: latestDynamicValues.current,
     };
     setSaveState("Saving...");
@@ -561,12 +613,13 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
         contractCategoryId: body.contractCategoryId || null,
         scope: body.scope.trim() || null,
         procurementRationale: body.procurementRationale.trim() || null,
+        budgetProvision: body.budgetProvision.trim() || null,
         contractAmount: body.contractAmount.trim() || null,
+        taxAmount: body.taxAmount.trim() || null,
         currencyId: body.currencyId || null,
         recommendedVendorId: body.recommendedVendorId || null,
         recommendedBidderId: body.recommendedBidderId || null,
         selectionRationale: body.selectionRationale.trim() || null,
-        budgetProvision: body.budgetProvision.trim() || null,
         dynamicValues: latestDynamicValues.current,
       };
       const id = activeContractId;
@@ -659,7 +712,7 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
       toast.error("Enter a company name for the new company.");
       return;
     }
-    if (companySelection === "__new__" && !newCompanyVendorTypeId) {
+    if (companySelection === "__new__" && !newVendorTypeId) {
       toast.error("Select a vendor type for the new company.");
       return;
     }
@@ -668,7 +721,7 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
     try {
       const bidder = await createBidder(form.id, {
         vendorId: companySelection === "__new__" ? null : newVendor || null,
-        vendorTypeId: companySelection === "__new__" ? newCompanyVendorTypeId : undefined,
+        vendorTypeId: companySelection === "__new__" ? newVendorTypeId : null,
         companyName: companySelection === "__new__" ? newCompany.companyName : undefined,
         contactPerson: companySelection === "__new__" ? newCompany.contactPerson || null : existingContact.contactPerson || null,
         email: companySelection === "__new__" ? newCompany.email || null : existingContact.email || null,
@@ -679,7 +732,7 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
       setNewVendor("");
       setCompanySelection("");
       setNewCompany(emptyCompanyDetails);
-      setNewCompanyVendorTypeId("");
+      setNewVendorTypeId(refs?.vendorTypes[0]?.id ?? "");
       toast.success("Bidder added.");
     } catch (createError) {
       toast.error(errorMessage(createError, "Unable to add bidder."));
@@ -807,6 +860,26 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
     }
   }
 
+  async function importCostRows(file: File) {
+    if (!file.name.toLowerCase().endsWith(".xlsx")) {
+      toast.error("Choose an .xlsx cost estimate file.");
+      return;
+    }
+    setImportingCostEstimate(true);
+    try {
+      const saved = contract?.id ? contract : await persistMain();
+      const imported = await importCostEstimate(saved.id, file);
+      setCostLines((current) =>
+        [...current, ...imported].sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id)),
+      );
+      toast.success(`${imported.length} cost row${imported.length === 1 ? "" : "s"} imported.`);
+    } catch (caught) {
+      toast.error(errorMessage(caught, "Unable to import the cost estimate."));
+    } finally {
+      setImportingCostEstimate(false);
+    }
+  }
+
   function setEvaluation(bidderId: string, type: EvalDraft["type"], patch: Partial<EvalDraft>) {
     setEvals((current) => {
       const existing = current.find((item) => item.bidderId === bidderId && item.type === type);
@@ -825,10 +898,35 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
 
   type FieldKey = Extract<keyof FormValues, string>;
   const input = (key: FieldKey, label: string, type = "text", readOnly = false) => (
-    <div className="space-y-2"><Label htmlFor={key}>{label}</Label><Input id={key} type={type} value={values[key]} readOnly={readOnly} onChange={(event) => setValue(key, event.target.value)} aria-invalid={Boolean(errors[key])} />{readOnly && <p className="text-xs text-muted-foreground">Generated automatically when the draft is first saved.</p>}{errors[key] && <p className="text-sm text-destructive">{errors[key]}</p>}</div>
+    <div className="space-y-1.5">
+      <Label htmlFor={key} className="text-sm font-medium">{label}</Label>
+      <Input
+        id={key}
+        type={type}
+        className="h-10"
+        value={values[key]}
+        readOnly={readOnly}
+        onChange={(event) => setValue(key, event.target.value)}
+        aria-invalid={Boolean(errors[key])}
+      />
+      {readOnly && <p className="text-xs text-muted-foreground">Generated automatically when the draft is first saved.</p>}
+      {errors[key] && <p className="text-xs text-destructive">{errors[key]}</p>}
+    </div>
   );
   const select = (key: FieldKey, label: string, options: { id: string; name: string }[], empty: string) => (
-    <div className="space-y-2"><Label htmlFor={key}>{label}</Label><select id={key} className="h-9 w-full rounded-lg border bg-background px-2 text-sm" value={values[key]} onChange={(event) => setValue(key, event.target.value)}><option value="">{empty}</option>{options.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}</select>{errors[key] && <p className="text-sm text-destructive">{errors[key]}</p>}</div>
+    <div className="space-y-1.5">
+      <Label htmlFor={key} className="text-sm font-medium">{label}</Label>
+      <select
+        id={key}
+        className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        value={values[key]}
+        onChange={(event) => setValue(key, event.target.value)}
+      >
+        <option value="">{empty}</option>
+        {options.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
+      </select>
+      {errors[key] && <p className="text-xs text-destructive">{errors[key]}</p>}
+    </div>
   );
   function goToError(field: string) {
     const sectionId =
@@ -836,165 +934,257 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
       : field === "scope" ? "project-description"
       : field === "sponsorDepartmentId" || field === "contractCategoryId" || field === "procurementRationale" ? "contract-information"
       : field.startsWith("quotation") || field.startsWith("evaluation") || field === "bidders" ? "bidder-management"
-      : field === "contractAmount" || field === "currencyId" || field === "selectionRationale" || field === "recommendedBidderId" ? "financial-information"
-      : field === "budgetProvision" || field === "costLines" ? "budget-information"
+      : field === "contractAmount" || field === "currencyId" || field === "selectionRationale" || field === "recommendedBidderId" || field === "budgetProvision" ? "financial-information"
+      : field === "costLines" || field === "taxAmount" ? "budget-information"
       : field === "approverIds" ? "approval-workflow"
       : "custom-form-fields";
     document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
-  return <main className="min-h-screen bg-muted/30 p-4 sm:p-8"><div className="mx-auto flex max-w-6xl flex-col gap-6">
-    <div className="flex flex-wrap items-center justify-between gap-4"><div><Link href={returnTo} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="size-4" />Back</Link><h1 className="mt-2 text-2xl font-bold">{contract ? "Edit contract" : "New contract"}</h1><p className={saveState === "Unable to save. Retry." ? "mt-1 text-sm text-destructive" : "mt-1 text-sm text-muted-foreground"}>{saveState}</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => void save()} disabled={busy || attachmentsUploading || saveInFlight.current !== null}><Save />Save draft</Button><Button onClick={() => void save(true)} disabled={busy || attachmentsUploading || preDraftUploadsPending || saveInFlight.current !== null}><Send />Submit</Button></div></div>
-    <section aria-label="Contract completion" className="sticky top-16 z-20 rounded-lg border bg-background/95 p-3 shadow-sm backdrop-blur">
-      <div className="mb-2 flex items-center justify-between gap-3 text-sm">
-        <span className="font-medium">{completionPercent}% complete</span>
-        <span className="text-muted-foreground">{completionCount} of {completionItems.length} sections ready</span>
-      </div>
-      <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${completionPercent}%` }} /></div>
-      <nav aria-label="Contract form sections" className="flex gap-2 overflow-x-auto pb-1">
-        {[
-          ["project-identification", "Identification"],
-          ["project-description", "Description"],
-          ["contract-information", "Information"],
-          ["bidder-management", "Bidders"],
-          ["financial-information", "Financial"],
-          ["supporting-documents", "Documents"],
-          ["approval-workflow", "Approvals"],
-          ["budget-information", "Budget"],
-        ].map(([id, label]) => (
-          <button key={id} type="button" onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })} className="shrink-0 rounded-md border px-2.5 py-1.5 text-xs hover:bg-muted">{label}</button>
-        ))}
-      </nav>
-    </section>
-    {attempted && Object.keys(errors).length > 0 && <div role="alert" className="scroll-mt-36 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive"><p className="font-semibold">Complete these items before submitting:</p><ul className="mt-2 list-inside space-y-1">{Object.entries(errors).map(([field, message]) => <li key={field}><button type="button" className="text-left underline underline-offset-2" onClick={() => goToError(field)}>{message}</button></li>)}</ul></div>}
-    <Card id="project-identification" className="scroll-mt-40 order-1"><CardHeader><CardTitle>Project identification</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{input("title", "Project name / contractor / contract title")}{input("referenceNo", "Reference number", "text", true)}</CardContent></Card>
-    <Card id="project-description" className="scroll-mt-40 order-2"><CardHeader><CardTitle>Project Description</CardTitle></CardHeader><CardContent><div className="space-y-2"><Label htmlFor="scope">Contract Description / Scope of Work</Label><Textarea id="scope" value={values.scope} onChange={(event) => setValue("scope", event.target.value)} aria-invalid={Boolean(errors.scope)} />{errors.scope && <p className="text-sm text-destructive">{errors.scope}</p>}</div></CardContent></Card>
-    <Card id="contract-information" className="scroll-mt-40 order-3"><CardHeader><CardTitle>Contract information</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">{select("sponsorDepartmentId", "Sponsor department", refs?.departments ?? [], "Select department")}{select("contractCategoryId", "Contract category", refs?.categories ?? [], "Select category")}<div className="md:col-span-2 space-y-2"><Label htmlFor="procurementRationale">Business Justification / Procurement Rationale</Label><Textarea id="procurementRationale" placeholder="Explain the business need, procurement approach, and supporting rationale." value={values.procurementRationale} onChange={(event) => setValue("procurementRationale", event.target.value)} aria-invalid={Boolean(errors.procurementRationale)} />{errors.procurementRationale && <p className="text-sm text-destructive">{errors.procurementRationale}</p>}</div></CardContent></Card>
-    <Card id="financial-information" className="scroll-mt-40 order-5">
-      <CardHeader><CardTitle>Financial and vendor information</CardTitle></CardHeader>
-      <CardContent className="grid gap-4 md:grid-cols-2">
-        {input("contractAmount", "Estimated contract amount *", "number")}
-        <div>
-          {select("currencyId", "Contract currency *", (refs?.currencies ?? []).map((item) => ({ id: item.id, name: `${item.code} - ${item.name}` })), "Select currency")}
-          <p className="mt-2 text-xs text-muted-foreground">Required before submission; drafts may leave this blank.</p>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="recommendedBidderId">Contracting vendor / recommended bidder *</Label>
-          <select id="recommendedBidderId" className="h-9 w-full rounded-lg border bg-background px-2 text-sm" value={values.recommendedBidderId} onChange={(event) => { setValue("recommendedBidderId", event.target.value); setValue("recommendedVendorId", ""); }} aria-invalid={Boolean(errors.recommendedBidderId)}>
-            <option value="">Select contracting vendor</option>
-            {bidders.map((bidder) => <option key={bidder.id} value={bidder.id}>{bidder.companyName || bidder.vendor?.name} — {bidder.vendorType?.name ?? bidder.vendor?.vendorType?.name ?? "Type missing"}</option>)}
-          </select>
-          {errors.recommendedBidderId && <p className="text-sm text-destructive">{errors.recommendedBidderId}</p>}
-          {bidders.length === 0 && <p className="text-sm text-muted-foreground">Please add a bidder in Bidder Management before selecting a contracting vendor.</p>}
-        </div>
-        <div className="space-y-2"><Label htmlFor="selectionRationale">Selection rationale</Label><Textarea id="selectionRationale" value={values.selectionRationale} onChange={(event) => setValue("selectionRationale", event.target.value)} aria-invalid={Boolean(errors.selectionRationale)} />{errors.selectionRationale && <p className="text-sm text-destructive">{errors.selectionRationale}</p>}</div>
-      </CardContent>
-    </Card>
-    <Card id="bidder-management" className="scroll-mt-40 order-4">
-      <CardHeader><CardTitle>Bidder Management</CardTitle></CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-            <div className="space-y-2">
-              <Label htmlFor="company-selection">Company</Label>
-              <select
-                id="company-selection"
-                className="h-10 w-full rounded-lg border bg-background px-3 text-sm"
-                value={companySelection}
-                onChange={(event) => {
-                  const selection = event.target.value;
-                  setCompanySelection(selection);
-                  if (selection === "__new__") {
-                    setNewVendor("");
-                    setNewCompanyVendorTypeId("");
-                  }
-                  else if (selection) {
-                    setNewVendor(selection);
-                    setNewCompany(emptyCompanyDetails);
-                    setNewCompanyVendorTypeId("");
-                  } else {
-                    setNewVendor("");
-                    setNewCompanyVendorTypeId("");
-                  }
-                }}
+  return (
+    <main className="min-h-screen bg-muted/30 p-4 sm:p-8">
+      <div className="mx-auto flex max-w-6xl flex-col gap-6">
+        {/* Page Header */}
+        <div className="flex flex-col gap-4 border-b border-border pb-6 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <Link href={returnTo} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+              <ArrowLeft className="size-4" />
+              Back
+            </Link>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <h1 className="text-3xl font-bold tracking-tight text-foreground">
+                {contract ? "Edit contract" : "New contract"}
+              </h1>
+              <span
+                className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+                  saveState === "Unable to save. Retry."
+                    ? "border-destructive/40 bg-destructive/10 text-destructive"
+                    : "border-border bg-card text-muted-foreground"
+                }`}
               >
-                <option value="">Select Company</option>
-                {(refs?.vendors ?? [])
-                  .filter((vendor) => !bidders.some((bidder) => bidder.vendorId === vendor.id))
-                  .map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
-                <option value="__new__">New Company</option>
-              </select>
+                {saveState}
+              </span>
             </div>
-            <Button
-              size="lg"
-              className="h-10 w-full sm:w-auto sm:min-w-36"
-              onClick={() => void addBidder()}
-              disabled={!companySelection}
-            >
-              <Plus />Add bidder
+            <p className="mt-1 text-sm text-muted-foreground">
+              {values.referenceNo ? `Reference: ${values.referenceNo}` : "Complete all required sections before submitting for approval."}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5">
+            {activeContractId && authUser && (
+              <CurrentPdfDownloadButton
+                formId={activeContractId}
+                referenceNo={(contract?.referenceNo ?? values.referenceNo) || null}
+                disabled={busy || saveInFlight.current !== null || saveState !== "All changes saved"}
+              />
+            )}
+            <Button variant="outline" onClick={() => void save()} disabled={busy || attachmentsUploading || saveInFlight.current !== null}>
+              <Save className="size-4" />
+              <span>Save draft</span>
+            </Button>
+            <Button onClick={() => void save(true)} disabled={busy || attachmentsUploading || preDraftUploadsPending || saveInFlight.current !== null}>
+              <Send className="size-4" />
+              <span>Submit for approval</span>
             </Button>
           </div>
-          {companySelection === "__new__" && (
-            <CompanyDetailsFields
-              value={newCompany}
-              onChange={setNewCompany}
-              idPrefix="new-company"
-              className="grid gap-3 rounded-lg border bg-muted/20 p-4 md:grid-cols-2"
-            />
-          )}
-          {companySelection === "__new__" && (
-            <div className="space-y-2 rounded-lg border bg-muted/20 p-4">
-              <Label htmlFor="new-company-vendor-type">Vendor Type</Label>
-              <select
-                id="new-company-vendor-type"
-                className="h-10 w-full rounded-lg border bg-background px-3 text-sm"
-                value={newCompanyVendorTypeId}
-                onChange={(event) => setNewCompanyVendorTypeId(event.target.value)}
-                required
-              >
-                <option value="">Select vendor type</option>
-                {(refs?.vendorTypes ?? []).map((vendorType) => (
-                  <option key={vendorType.id} value={vendorType.id}>{vendorType.name}</option>
-                ))}
-              </select>
-              {!refs?.vendorTypes.length && <p className="text-sm text-muted-foreground">Add a vendor type in reference data before adding a new company.</p>}
-            </div>
-          )}
-          {companySelection && companySelection !== "__new__" && (() => {
-            const company = refs?.vendors.find((vendor) => vendor.id === companySelection);
-            if (!company) return null;
-            const details = companyContactFields(company.contactDetails);
-            return (
-              <div className="rounded-lg border bg-muted/20 p-4" aria-live="polite">
-                <p className="font-medium">{company.name}</p>
-                <p className="text-sm text-muted-foreground">Vendor type: {company.vendorType?.name ?? "—"}</p>
-                <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
-                  <div><dt className="text-muted-foreground">Contact Person</dt><dd>{details.contactPerson || "—"}</dd></div>
-                  <div><dt className="text-muted-foreground">Email</dt><dd>{details.email || "—"}</dd></div>
-                  <div><dt className="text-muted-foreground">Phone</dt><dd>{details.phone || "—"}</dd></div>
-                  <div className="sm:col-span-2"><dt className="text-muted-foreground">Qualification / Experience</dt><dd className="whitespace-pre-wrap">{details.qualifications || "—"}</dd></div>
-                </dl>
-              </div>
-            );
-          })()}
         </div>
-        {bidders.length === 0 && <p className="text-sm text-muted-foreground">Choose a company above and select Add bidder to get started.</p>}
-        {bidders.map((bidder) => {
-          const draft = quotationDrafts[bidder.id] ?? { amount: "", notes: "" };
-          return <div key={bidder.id} className="space-y-4 rounded-lg border p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <p className="font-semibold">{bidder.companyName || bidder.vendor?.name}</p>
-                <p className="text-xs text-muted-foreground">Bidder {bidder.sortOrder + 1}</p>
-                {bidder.vendorId ? (
-                  <p className="text-xs text-muted-foreground">Vendor type: {bidder.vendor?.vendorType?.name ?? "—"}</p>
-                ) : (
-                  <div className="mt-1 flex items-center gap-2">
-                    <Label htmlFor={`bidder-vendor-type-${bidder.id}`} className="text-xs">Vendor type</Label>
+
+        {/* Sticky Progress & Section Navigation */}
+        <section aria-label="Contract completion" className="sticky top-16 z-20 rounded-xl border border-border bg-card/95 p-4 shadow-sm backdrop-blur">
+          <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+            <span className="font-semibold tabular-nums">{completionPercent}% complete</span>
+            <span className="text-xs text-muted-foreground tabular-nums">{completionCount} of {completionItems.length} sections ready</span>
+          </div>
+          <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-muted">
+            <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${completionPercent}%` }} />
+          </div>
+          <nav aria-label="Contract form sections" className="flex gap-1.5 overflow-x-auto pb-0.5">
+            {[
+              ["project-identification", "1. Identification"],
+              ["project-description", "2. Description"],
+              ["contract-information", "3. Information"],
+              ["bidder-management", "4. Bidders"],
+              ["financial-information", "5. Financial"],
+              ["supporting-documents", "6. Documents"],
+              ["approval-workflow", "7. Approvals"],
+              ["budget-information", "8. Budget"],
+            ].map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                className="shrink-0 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
+        </section>
+
+        {attempted && Object.keys(errors).length > 0 && (
+          <div role="alert" className="scroll-mt-36 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+            <p className="font-semibold">Complete these items before submitting:</p>
+            <ul className="mt-2 list-inside list-disc space-y-1">
+              {Object.entries(errors).map(([field, message]) => (
+                <li key={field}>
+                  <button type="button" className="text-left underline underline-offset-2" onClick={() => goToError(field)}>
+                    {message}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Section 1 */}
+        <Card id="project-identification" className="scroll-mt-40 order-1 border-border bg-card">
+          <CardHeader className="border-b border-border/60 pb-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Section 01</p>
+            <CardTitle className="text-lg font-semibold">Project identification</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-5 pt-5 md:grid-cols-2">
+            {input("title", "Project name / contractor / contract title")}
+            {input("referenceNo", "Reference number", "text", true)}
+          </CardContent>
+        </Card>
+
+        {/* Section 2 */}
+        <Card id="project-description" className="scroll-mt-40 order-2 border-border bg-card">
+          <CardHeader className="border-b border-border/60 pb-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Section 02</p>
+            <CardTitle className="text-lg font-semibold">Project description</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-5">
+            <div className="space-y-1.5">
+              <Label htmlFor="scope" className="text-sm font-medium">Scope of work</Label>
+              <Textarea
+                id="scope"
+                className="min-h-28"
+                value={values.scope}
+                onChange={(event) => setValue("scope", event.target.value)}
+                aria-invalid={Boolean(errors.scope)}
+              />
+              {errors.scope && <p className="text-xs text-destructive">{errors.scope}</p>}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Section 3 */}
+        <Card id="contract-information" className="scroll-mt-40 order-3 border-border bg-card">
+          <CardHeader className="border-b border-border/60 pb-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Section 03</p>
+            <CardTitle className="text-lg font-semibold">Contract information</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-5 pt-5 md:grid-cols-2">
+            {select("sponsorDepartmentId", "Sponsor department", refs?.departments ?? [], "Select department")}
+            {select("contractCategoryId", "Contract category", refs?.categories ?? [], "Select category")}
+            <div className="space-y-1.5 md:col-span-2">
+              <Label htmlFor="procurementRationale" className="text-sm font-medium">Sourcing / procurement rationale</Label>
+              <Textarea
+                id="procurementRationale"
+                className="min-h-24"
+                value={values.procurementRationale}
+                onChange={(event) => setValue("procurementRationale", event.target.value)}
+                aria-invalid={Boolean(errors.procurementRationale)}
+              />
+              {errors.procurementRationale && <p className="text-xs text-destructive">{errors.procurementRationale}</p>}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Section 5 (ordered after Bidders) */}
+        <Card id="financial-information" className="scroll-mt-40 order-5 border-border bg-card">
+          <CardHeader className="border-b border-border/60 pb-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Section 05</p>
+            <CardTitle className="text-lg font-semibold">Financial and vendor recommendation</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-5 pt-5 md:grid-cols-2">
+            {input("budgetProvision", "Budget provision (planned total) *", "number")}
+            {input("contractAmount", "Estimated contract amount", "number")}
+            {select("currencyId", "Currency *", (refs?.currencies ?? []).map((item) => ({ id: item.id, name: `${item.code} - ${item.name}` })), "Select currency")}
+            <div className="space-y-1.5">
+              <Label htmlFor="recommendedBidderId" className="text-sm font-medium">Contracting vendor / recommended bidder *</Label>
+              <select
+                id="recommendedBidderId"
+                className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                value={values.recommendedBidderId}
+                onChange={(event) => { setValue("recommendedBidderId", event.target.value); setValue("recommendedVendorId", ""); }}
+              >
+                <option value="">Select contracting vendor</option>
+                {bidders.map((bidder) => <option key={bidder.id} value={bidder.id}>{bidder.companyName || bidder.vendor?.name} — {bidder.vendorType?.name ?? bidder.vendor?.vendorType?.name ?? "Type missing"}</option>)}
+              </select>
+              {bidders.length === 0 && <p className="text-xs text-muted-foreground">Please add a bidder in Bidder Management before selecting a recommended bidder.</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="selectionRationale" className="text-sm font-medium">Selection rationale</Label>
+              <Textarea
+                id="selectionRationale"
+                value={values.selectionRationale}
+                onChange={(event) => setValue("selectionRationale", event.target.value)}
+                aria-invalid={Boolean(errors.selectionRationale)}
+              />
+              {errors.selectionRationale && <p className="text-xs text-destructive">{errors.selectionRationale}</p>}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Section 4 */}
+        <Card id="bidder-management" className="scroll-mt-40 order-4 border-border bg-card">
+          <CardHeader className="border-b border-border/60 pb-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Section 04</p>
+            <CardTitle className="text-lg font-semibold">Bidder management</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5 pt-5">
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                <div className="space-y-1.5">
+                  <Label htmlFor="company-selection" className="text-sm font-medium">Company</Label>
+                  <select
+                    id="company-selection"
+                    className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    value={companySelection}
+                    onChange={(event) => {
+                      const selection = event.target.value;
+                      setCompanySelection(selection);
+                      if (selection === "__new__") setNewVendor("");
+                      else if (selection) {
+                        setNewVendor(selection);
+                        setNewCompany(emptyCompanyDetails);
+                      } else {
+                        setNewVendor("");
+                      }
+                    }}
+                  >
+                    <option value="">Select Company</option>
+                    {(refs?.vendors ?? [])
+                      .filter((vendor) => !bidders.some((bidder) => bidder.vendorId === vendor.id))
+                      .map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
+                    <option value="__new__">New Company</option>
+                  </select>
+                </div>
+                <Button
+                  size="lg"
+                  className="h-10 w-full sm:w-auto sm:min-w-36"
+                  onClick={() => void addBidder()}
+                  disabled={!companySelection}
+                >
+                  <Plus className="size-4" />Add bidder
+                </Button>
+              </div>
+              {companySelection === "__new__" && (
+                <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
+                  <CompanyDetailsFields
+                    value={newCompany}
+                    onChange={setNewCompany}
+                    idPrefix="new-company"
+                    className="grid gap-3 md:grid-cols-2"
+                  />
+                  <div className="space-y-1.5">
+                    <Label htmlFor="new-company-vendor-type">Vendor type</Label>
                     <select
-                      id={`bidder-vendor-type-${bidder.id}`}
-                      className="h-8 rounded-lg border bg-background px-2 text-xs"
-                      value={bidder.vendorTypeId ?? ""}
-                      onChange={(event) => void changeBidderVendorType(bidder, event.target.value)}
+                      id="new-company-vendor-type"
+                      className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
+                      value={newVendorTypeId}
+                      onChange={(event) => setNewVendorTypeId(event.target.value)}
+                      required
                     >
                       <option value="">Select vendor type</option>
                       {(refs?.vendorTypes ?? []).map((vendorType) => (
@@ -1002,118 +1192,304 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
                       ))}
                     </select>
                   </div>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-1"><Button size="sm" variant="outline" onClick={() => void editBidder(bidder)}>Edit details</Button><Button size="sm" variant="ghost" className="text-destructive" onClick={() => void removeBidder(bidder)}><Trash2 />Remove</Button></div>
+                </div>
+              )}
+              {companySelection && companySelection !== "__new__" && (() => {
+                const company = refs?.vendors.find((vendor) => vendor.id === companySelection);
+                if (!company) return null;
+                const details = companyContactFields(company.contactDetails);
+                return (
+                  <div className="rounded-lg border border-border bg-muted/20 p-4" aria-live="polite">
+                    <p className="font-medium">{company.name}</p>
+                    <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+                      <div><dt className="text-xs text-muted-foreground">Vendor type</dt><dd>{company.vendorType?.name || "—"}</dd></div>
+                      <div><dt className="text-xs text-muted-foreground">Contact Person</dt><dd>{details.contactPerson || "—"}</dd></div>
+                      <div><dt className="text-xs text-muted-foreground">Email</dt><dd>{details.email || "—"}</dd></div>
+                      <div><dt className="text-xs text-muted-foreground">Phone</dt><dd>{details.phone || "—"}</dd></div>
+                      <div className="sm:col-span-2"><dt className="text-xs text-muted-foreground">Qualification / Experience</dt><dd className="whitespace-pre-wrap">{details.qualifications || "—"}</dd></div>
+                    </dl>
+                  </div>
+                );
+              })()}
             </div>
-            <div>
-              <h3 className="mb-2 font-medium">Quotations</h3>
-              {bidder.quotations.length === 0 ? <p className="text-sm text-muted-foreground">No quotations.</p> : <div className="space-y-2">{bidder.quotations.map((quotation) => <div key={quotation.id} className="flex flex-wrap items-center justify-between gap-2 rounded bg-muted/50 p-2 text-sm"><span>{quotation.currency?.code ?? "—"} {quotation.quotedAmount}{quotation.notes ? ` — ${quotation.notes}` : ""}</span><span className="flex gap-1"><Button size="sm" variant="ghost" onClick={() => void editQuotation(bidder, quotation)}>Edit</Button><Button size="sm" variant="ghost" className="text-destructive" onClick={() => void removeQuotation(bidder, quotation.id)}>Remove</Button></span></div>)}</div>}
-              <div className="mt-2 flex flex-col gap-2 sm:flex-row"><Input type="number" placeholder="Quoted amount" value={draft.amount} onChange={(event) => setQuotationDrafts((current) => ({ ...current, [bidder.id]: { ...draft, amount: event.target.value } }))} /><Input placeholder="Quotation description / notes" value={draft.notes} onChange={(event) => setQuotationDrafts((current) => ({ ...current, [bidder.id]: { ...draft, notes: event.target.value } }))} /><Button size="lg" variant="outline" className="h-10 sm:flex-none" onClick={() => void addQuotation(bidder)}><Plus />Add quotation</Button></div>
-            </div>
-            <div>
-              <h3 className="mb-2 font-medium">Evaluations</h3>
-              <div className="grid gap-3 md:grid-cols-2">
-                {(["TECHNICAL", "COMMERCIAL"] as const).map((type) => {
-                  const current = evals.find((item) => item.bidderId === bidder.id && item.type === type) ?? { bidderId: bidder.id, type, score: "", remarks: "" };
-                  return (
-                    <div key={type} className="space-y-2 rounded border p-3">
-                      <Label>{type === "TECHNICAL" ? "Technical evaluation" : "Commercial evaluation"}</Label>
-                      <Input type="number" placeholder="Score (optional)" value={current.score} onChange={(event) => setEvaluation(bidder.id, type, { score: event.target.value })} />
-                      <Textarea placeholder="Evaluation remarks" value={current.remarks} onChange={(event) => setEvaluation(bidder.id, type, { remarks: event.target.value })} />
+            {bidders.length === 0 && (
+              <p className="rounded-lg border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
+                Choose a company above and select Add bidder to get started.
+              </p>
+            )}
+            {bidders.map((bidder) => {
+              const draft = quotationDrafts[bidder.id] ?? { amount: "", notes: "" };
+              return (
+                <div key={bidder.id} className="space-y-4 rounded-xl border border-border bg-background p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-3">
+                    <div>
+                      <p className="font-semibold text-foreground">{bidder.companyName || bidder.vendor?.name}</p>
+                      <p className="text-xs text-muted-foreground">Bidder {bidder.sortOrder + 1}</p>
+                      {bidder.vendorId ? (
+                        <p className="text-xs text-muted-foreground">Vendor type: {bidder.vendor?.vendorType?.name ?? "—"}</p>
+                      ) : (
+                        <div className="mt-1 flex items-center gap-2">
+                          <Label htmlFor={`bidder-vendor-type-${bidder.id}`} className="text-xs">Vendor type</Label>
+                          <select
+                            id={`bidder-vendor-type-${bidder.id}`}
+                            className="h-8 rounded-lg border border-input bg-background px-2 text-xs"
+                            value={bidder.vendorTypeId ?? ""}
+                            onChange={(event) => void changeBidderVendorType(bidder, event.target.value)}
+                          >
+                            <option value="">Select vendor type</option>
+                            {(refs?.vendorTypes ?? []).map((vendorType) => (
+                              <option key={vendorType.id} value={vendorType.id}>{vendorType.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
                     </div>
-                  );
-                })}
+                    <div className="flex flex-wrap gap-1.5">
+                      <Button size="sm" variant="outline" onClick={() => void editBidder(bidder)}>Edit details</Button>
+                      <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => void removeBidder(bidder)}>
+                        <Trash2 className="size-3.5" />Remove
+                      </Button>
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className="mb-2 text-sm font-semibold">Quotations</h3>
+                    {bidder.quotations.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No quotations recorded.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {bidder.quotations.map((quotation) => (
+                          <div key={quotation.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-sm">
+                            <span className="tabular-nums">
+                              <strong>{quotation.currency?.code ?? "—"} {quotation.quotedAmount}</strong>
+                              {quotation.notes ? ` — ${quotation.notes}` : ""}
+                            </span>
+                            <span className="flex gap-1">
+                              <Button size="sm" variant="ghost" onClick={() => void editQuotation(bidder, quotation)}>Edit</Button>
+                              <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => void removeQuotation(bidder, quotation.id)}>Remove</Button>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                      <Input
+                        type="number"
+                        className="h-10"
+                        placeholder="Quoted amount"
+                        value={draft.amount}
+                        onChange={(event) => setQuotationDrafts((current) => ({ ...current, [bidder.id]: { ...draft, amount: event.target.value } }))}
+                      />
+                      <Input
+                        className="h-10"
+                        placeholder="Quotation description / notes"
+                        value={draft.notes}
+                        onChange={(event) => setQuotationDrafts((current) => ({ ...current, [bidder.id]: { ...draft, notes: event.target.value } }))}
+                      />
+                      <Button size="lg" variant="outline" className="h-10 sm:flex-none" onClick={() => void addQuotation(bidder)}>
+                        <Plus className="size-4" />Add quotation
+                      </Button>
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className="mb-2 text-sm font-semibold">Evaluations</h3>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {(["TECHNICAL", "COMMERCIAL"] as const).map((type) => {
+                        const current = evals.find((item) => item.bidderId === bidder.id && item.type === type) ?? { bidderId: bidder.id, type, score: "", remarks: "" };
+                        return (
+                          <div key={type} className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
+                            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                              {type === "TECHNICAL" ? "Technical evaluation" : "Commercial evaluation"}
+                            </Label>
+                            <Input type="number" className="h-9 bg-background" placeholder="Score (optional)" value={current.score} onChange={(event) => setEvaluation(bidder.id, type, { score: event.target.value })} />
+                            <Textarea className="bg-background" placeholder="Evaluation remarks" value={current.remarks} onChange={(event) => setEvaluation(bidder.id, type, { remarks: event.target.value })} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+
+        {/* Section 6 */}
+        <Card id="supporting-documents" className="scroll-mt-40 order-7 border-border bg-card">
+          <CardHeader className="border-b border-border/60 pb-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Section 06</p>
+            <CardTitle className="text-lg font-semibold">Supporting documents</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-5">
+            <AttachmentUploader formId={activeContractId} limits={attachmentLimits} onUploaded={() => setAttachmentRefresh((value) => value + 1)} onUploadStateChange={setAttachmentsUploading} onPreDraftPendingChange={updatePreDraftUploadsPending} />
+            {activeContractId && <AttachmentList formId={activeContractId} refreshKey={attachmentRefresh} canDelete={isEditable} />}
+          </CardContent>
+        </Card>
+
+        {/* Section 7 */}
+        <Card id="approval-workflow" className="scroll-mt-40 order-8 border-border bg-card">
+          <CardHeader className="border-b border-border/60 pb-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Section 07</p>
+            <CardTitle className="text-lg font-semibold">Approval workflow</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 pt-5">
+            <p className="text-sm text-muted-foreground">Select the employees responsible for reviewing and approving this contract. Approvals will follow the sequence specified below.</p>
+            <div className="space-y-1.5">
+              <Label htmlFor="contract-approver-search" className="text-sm font-medium">Select an Approver</Label>
+              <ApproverSelect inputId="contract-approver-search" value={approverIds} onChange={setApproverIds} />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Section 8 */}
+        <Card id="budget-information" className="scroll-mt-40 order-9 border-border bg-card">
+          <CardHeader className="border-b border-border/60 pb-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Section 08</p>
+            <CardTitle className="text-lg font-semibold">Budget and cost information</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5 pt-5">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="taxAmount">Tax amount (manual entry)</Label>
+                <Input
+                  id="taxAmount"
+                  type="number"
+                  min="0"
+                  step="0.0001"
+                  value={values.taxAmount}
+                  onChange={(event) => setValue("taxAmount", event.target.value)}
+                />
               </div>
             </div>
-          </div>;
-        })}
-      </CardContent>
-    </Card>
-    <Card id="supporting-documents" className="scroll-mt-40 order-7"><CardHeader><CardTitle>Supporting documents</CardTitle></CardHeader><CardContent className="space-y-4"><AttachmentUploader formId={activeContractId} limits={attachmentLimits} onUploaded={() => setAttachmentRefresh((value) => value + 1)} onUploadStateChange={setAttachmentsUploading} onPreDraftPendingChange={updatePreDraftUploadsPending} />{activeContractId && <AttachmentList formId={activeContractId} refreshKey={attachmentRefresh} canDelete={!readOnly && isEditable} />}</CardContent></Card>
-    <Card id="approval-workflow" className="scroll-mt-40 order-8"><CardHeader><CardTitle>Approval Workflow</CardTitle></CardHeader><CardContent className="space-y-2"><p className="text-sm text-muted-foreground">Select the employees responsible for reviewing and approving this contract. Approvals will follow the sequence specified below.</p><Label htmlFor="contract-approver-search">Select an Approver</Label><ApproverSelect inputId="contract-approver-search" value={approverIds} onChange={setApproverIds} /></CardContent></Card>
-    <Card id="budget-information" className="scroll-mt-40 order-9">
-      <CardHeader><CardTitle>Budget and cost information</CardTitle></CardHeader>
-      <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">Tax is not configured; tax is 0.00.</p>
-        <div className="max-w-sm space-y-2">
-          {input("budgetProvision", "Budget provision *", "number")}
-          <p className="text-xs text-muted-foreground">Required before submission; drafts may leave this blank. Enter the overall approved/provided budget separately from the cost-line estimate using the selected contract currency.</p>
-        </div>
-        {costLines.map((line) => (
-          <div key={line.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2 text-sm">
-            <span>{line.description}: {line.quantity} × {line.unitCost} = {line.amount}</span>
-            <span>
-              <Button size="sm" variant="ghost" onClick={() => setCostDraft({ id: line.id, description: line.description, quantity: line.quantity ?? "", unitCost: line.unitCost ?? "", amount: line.amount })}>Edit</Button>
-              <Button size="sm" variant="ghost" className="text-destructive" onClick={() => void removeCostLine(line)}>Remove</Button>
-            </span>
-          </div>
-        ))}
-        <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
-          <div>
-            <p className="font-medium">{costDraft.id ? "Edit cost item" : "Add a cost item"}</p>
-            <p className="mt-1 text-sm text-muted-foreground">Enter a description, quantity, and unit cost. The amount is calculated automatically.</p>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="space-y-2">
-              <Label htmlFor="cost-description">Description</Label>
-              <Input id="cost-description" placeholder="e.g. Installation services" value={costDraft.description} onChange={(event) => setCostDraft({ ...costDraft, description: event.target.value })} />
+            <div className="space-y-2 rounded-lg border border-border p-3">
+              <p className="text-sm font-medium">Import cost rows from Excel</p>
+              <p className="text-xs text-muted-foreground">
+                Download the template, fill in Description, Quantity, and Unit Cost, then import it. Imported rows are added to existing rows.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy || importingCostEstimate}
+                  onClick={() => void downloadCostEstimateTemplate().catch((caught) =>
+                    toast.error(errorMessage(caught, "Unable to download the Excel template.")),
+                  )}
+                >
+                  <Download />Download Excel template
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy || importingCostEstimate}
+                  onClick={() => costEstimateFileRef.current?.click()}
+                >
+                  {importingCostEstimate ? <LoaderCircle className="animate-spin" /> : null}
+                  {importingCostEstimate ? "Importing..." : "Import cost rows"}
+                </Button>
+                <input
+                  ref={costEstimateFileRef}
+                  type="file"
+                  accept=".xlsx"
+                  className="sr-only"
+                  aria-label="Excel cost estimate file"
+                  disabled={busy || importingCostEstimate}
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0];
+                    event.currentTarget.value = "";
+                    if (file) void importCostRows(file);
+                  }}
+                />
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="cost-quantity">Quantity</Label>
-              <Input id="cost-quantity" placeholder="Enter quantity" min="0" type="number" value={costDraft.quantity} onChange={(event) => { const quantity = event.target.value; setCostDraft({ ...costDraft, quantity, amount: quantity && costDraft.unitCost ? calculatedAmount(quantity, costDraft.unitCost) : "" }); }} />
+            {costLines.length > 0 && (
+              <div className="divide-y divide-border rounded-lg border border-border">
+                {costLines.map((line) => (
+                  <div key={line.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
+                    <div>
+                      <p className="font-medium text-foreground">{line.description}</p>
+                      <p className="text-xs text-muted-foreground tabular-nums">
+                        {line.quantity} × {line.unitCost} = <strong className="text-foreground">{line.amount}</strong>
+                      </p>
+                    </div>
+                    <div className="flex gap-1">
+                      <Button size="sm" variant="ghost" onClick={() => setCostDraft({ id: line.id, description: line.description, quantity: line.quantity ?? "", unitCost: line.unitCost ?? "", amount: line.amount })}>Edit</Button>
+                      <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => void removeCostLine(line)}>Remove</Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="space-y-4 rounded-xl border border-border bg-muted/20 p-4">
+              <div>
+                <p className="font-semibold text-sm">{costDraft.id ? "Edit cost item" : "Add a cost item"}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">Enter a description, quantity, and unit cost. The amount is calculated automatically.</p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="cost-description">Description</Label>
+                  <Input id="cost-description" className="h-10 bg-background" placeholder="e.g. Installation services" value={costDraft.description} onChange={(event) => setCostDraft({ ...costDraft, description: event.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="cost-quantity">Quantity</Label>
+                  <Input id="cost-quantity" className="h-10 bg-background" placeholder="Enter quantity" min="0" type="number" value={costDraft.quantity} onChange={(event) => { const quantity = event.target.value; setCostDraft({ ...costDraft, quantity, amount: quantity && costDraft.unitCost ? calculatedAmount(quantity, costDraft.unitCost) : "" }); }} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="cost-unit-cost">Unit cost</Label>
+                  <Input id="cost-unit-cost" className="h-10 bg-background" placeholder="Enter unit cost" min="0" type="number" value={costDraft.unitCost} onChange={(event) => { const unitCost = event.target.value; setCostDraft({ ...costDraft, unitCost, amount: costDraft.quantity && unitCost ? calculatedAmount(costDraft.quantity, unitCost) : "" }); }} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="cost-amount">Calculated amount</Label>
+                  <Input id="cost-amount" className="h-10 bg-muted tabular-nums" readOnly placeholder="Calculated automatically" value={costDraft.amount} />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <Button size="lg" className="h-10 w-full sm:w-auto" onClick={() => void saveCostLine()}>
+                  {costDraft.id ? <Save className="size-4" /> : <Plus className="size-4" />}
+                  {costDraft.id ? "Save cost item" : "Add cost item"}
+                </Button>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="cost-unit-cost">Unit cost</Label>
-              <Input id="cost-unit-cost" placeholder="Enter unit cost" min="0" type="number" value={costDraft.unitCost} onChange={(event) => { const unitCost = event.target.value; setCostDraft({ ...costDraft, unitCost, amount: costDraft.quantity && unitCost ? calculatedAmount(costDraft.quantity, unitCost) : "" }); }} />
+            <div className="flex flex-wrap justify-end gap-x-8 gap-y-2 rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm tabular-nums">
+              <span className="text-muted-foreground">Subtotal: <strong className="text-foreground">{costTotal(costLines)}</strong></span>
+              <span className="text-muted-foreground">Tax: <strong className="text-foreground">{sumMoney([values.taxAmount || "0"])}</strong></span>
+              <span className="text-base font-bold text-foreground">Total: {totalWithTax(costLines, values.taxAmount)}</span>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="cost-amount">Calculated amount</Label>
-              <Input id="cost-amount" readOnly placeholder="Calculated automatically" value={costDraft.amount} />
+          </CardContent>
+        </Card>
+
+        {formSchema?.definition.sections.length ? (
+          <section id="custom-form-fields" className="scroll-mt-40">
+            <DynamicFormSections
+              definition={formSchema.definition}
+              values={dynamicValues}
+              errors={errors}
+              onChange={setDynamicValue}
+            />
+          </section>
+        ) : null}
+
+        <Dialog open={submitReviewOpen} onOpenChange={setSubmitReviewOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Submit contract for approval?</DialogTitle>
+              <DialogDescription>
+                Review is complete. After submission, this contract will become read-only until it is returned for changes.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm">
+              <p className="font-medium">{values.title || "Untitled contract"}</p>
+              <p className="mt-1 font-mono text-xs text-muted-foreground">{values.referenceNo || "Reference number will be assigned"}</p>
+              <p className="mt-1 text-muted-foreground">Approval levels: {approverIds.length}</p>
             </div>
-          </div>
-          <div className="flex justify-end">
-            <Button size="lg" className="h-10 w-full sm:w-auto" onClick={() => void saveCostLine()}>
-              {costDraft.id ? <Save /> : <Plus />}
-              {costDraft.id ? "Save cost item" : "Add cost item"}
-            </Button>
-          </div>
-        </div>
-        <div className="flex flex-wrap justify-end gap-x-6 gap-y-1 border-t pt-3 text-sm">
-          <span>Subtotal: {costTotal(costLines)}</span>
-          <span>Tax: 0.0000</span>
-          <strong>Total: {costTotal(costLines)}</strong>
-        </div>
-      </CardContent>
-    </Card>
-    {formSchema?.definition.sections.length ? (
-      <section id="custom-form-fields" className="scroll-mt-40">
-        <DynamicFormSections
-          definition={formSchema.definition}
-          values={dynamicValues}
-          errors={errors}
-          onChange={setDynamicValue}
-        />
-      </section>
-    ) : null}
-    <Dialog open={submitReviewOpen} onOpenChange={setSubmitReviewOpen}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Submit contract for approval?</DialogTitle>
-          <DialogDescription>
-            Review is complete. After submission, this contract will become read-only until it is returned for changes.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="rounded-lg border p-3 text-sm">
-          <p className="font-medium">{values.title || "Untitled contract"}</p>
-          <p className="mt-1 text-muted-foreground">{values.referenceNo || "Reference number will be assigned"}</p>
-          <p className="mt-1 text-muted-foreground">Approval levels: {approverIds.length}</p>
-        </div>
-        <DialogFooter>
-          <DialogClose render={<Button variant="outline" disabled={busy}>Cancel</Button>} />
-          <Button onClick={() => void save(true, true)} disabled={busy}><Send />Confirm and submit</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  </div></main>;
+            <DialogFooter>
+              <DialogClose render={<Button variant="outline" disabled={busy}>Cancel</Button>} />
+              <Button onClick={() => void save(true, true)} disabled={busy}>
+                <Send className="size-4" />
+                Confirm and submit
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </main>
+  );
 }

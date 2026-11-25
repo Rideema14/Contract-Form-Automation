@@ -33,11 +33,13 @@ export interface AttachmentRepository {
   listByContract(contractFormId: string): Promise<AttachmentRecord[]>;
   delete(id: string): Promise<boolean>;
   restore(record: AttachmentRecord): Promise<void>;
+  recordAuditEvents(records: AttachmentRecord[]): Promise<void>;
 }
 
 /** In-memory repository for tests and local development. */
 export class InMemoryAttachmentRepository implements AttachmentRepository {
   private readonly rows = new Map<string, AttachmentRecord>();
+  private readonly auditEvents: Array<{ action: string; attachmentId: string }> = [];
 
   async create(data: NewAttachment): Promise<AttachmentRecord> {
     const record: AttachmentRecord = { ...data, id: randomUUID(), createdAt: new Date() };
@@ -57,5 +59,16 @@ export class InMemoryAttachmentRepository implements AttachmentRepository {
   }
   async restore(record: AttachmentRecord): Promise<void> {
     this.rows.set(record.id, record);
+  }
+
+  async recordAuditEvents(records: AttachmentRecord[]): Promise<void> {
+    this.auditEvents.push(...records.map((record) => ({
+      action: record.category === 'GENERATED_PDF' ? 'PDF_GENERATED' : 'ATTACHMENT_UPLOADED',
+      attachmentId: record.id,
+    })));
+  }
+
+  listAuditEvents(): Array<{ action: string; attachmentId: string }> {
+    return [...this.auditEvents];
   }
 }

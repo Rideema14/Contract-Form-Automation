@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Search,
   Trash2,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -195,6 +196,7 @@ export default function ContractsPage() {
   const [downloadingPdfId, setDownloadingPdfId] = useState<string | null>(null);
   const isAdmin = authUser?.role === "ADMIN";
   const contractsRequestVersion = useRef(0);
+  const hasActiveFilters = Boolean(query) || status !== "ALL" || departmentId !== "ALL" || Boolean(from || to);
 
   const loadContracts = useCallback(async () => {
     const requestVersion = ++contractsRequestVersion.current;
@@ -275,6 +277,16 @@ export default function ContractsPage() {
 
   function changeStatus(value: string | null) {
     setStatus((value ?? "ALL") as ContractStatus | "ALL");
+    setPage(1);
+  }
+
+  function resetFilters() {
+    setSearch("");
+    setQuery("");
+    setStatus("ALL");
+    setDepartmentId("ALL");
+    setFrom("");
+    setTo("");
     setPage(1);
   }
 
@@ -518,6 +530,12 @@ export default function ContractsPage() {
               >
                 <RefreshCw className={isLoading ? "animate-spin" : ""} />
               </Button>
+              {hasActiveFilters && (
+                <Button type="button" variant="outline" className="h-10" onClick={resetFilters}>
+                  <X className="size-4" />
+                  Clear filters
+                </Button>
+              )}
             </form>
 
             {departmentError && (
@@ -553,6 +571,11 @@ export default function ContractsPage() {
                 <p className="mt-1 text-sm text-muted-foreground">
                   Try changing your search or create a new contract.
                 </p>
+                {hasActiveFilters && (
+                  <Button type="button" variant="outline" size="sm" className="mt-3" onClick={resetFilters}>
+                    Clear filters
+                  </Button>
+                )}
               </div>
             ) : (
               <>

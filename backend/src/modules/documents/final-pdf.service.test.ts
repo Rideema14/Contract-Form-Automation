@@ -90,24 +90,59 @@ describe('final PDF service', () => {
     expect(drive.uploads).toBe(0);
   });
 
-  it('refuses an approved status with an approval level still pending', async () => {
+  it('refuses final PDF generation when any approval level is still pending', async () => {
     const drive = new FakeDrive();
     const documents = new DocumentService({ drive, repository: new InMemoryAttachmentRepository() });
-    const generate = vi.fn().mockResolvedValue(Buffer.from('%PDF-fake'));
     const service = createFinalPdfService({
       documents,
-      generate,
+      generate: vi.fn().mockResolvedValue(Buffer.from('%PDF-fake')),
       loadForm: async () => ({
         ...form('APPROVED'),
-        approvalSteps: [
-          { level: 1, status: 'APPROVED' },
-          { level: 2, status: 'PENDING' },
-        ],
-      } as FinalPdfSource['form']),
+        approvalSteps: [{ level: 1, status: 'PENDING' }],
+      }),
       loadHistory: async () => history,
     });
 
     await expect(service.generateAndStoreFinalPdf('f1', actor)).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'FORM_NOT_APPROVED',
+    });
+    expect(drive.uploads).toBe(0);
+  });
+
+  it('renders a current PDF snapshot for a draft without storing it', async () => {
+    const { service, drive, generate } = setup('DRAFT');
+
+    const file = await service.generateCurrentPdf('f1', actor);
+
+    expect(file.fileName).toBe('CF-1_-_Current.pdf');
+    expect(file.content).toEqual(Buffer.from('%PDF-fake'));
+    expect(generate).toHaveBeenCalledOnce();
+    expect(drive.uploads).toBe(0);
+  });
+
+  it('lets a submitter generate the stored final PDF only after approval', async () => {
+    const { service, drive } = setup();
+
+    const attachment = await service.generateFinalPdfAttachment('f1', {
+      id: 'submitter',
+      role: 'SUBMITTER',
+    });
+
+    expect(attachment).toMatchObject({
+      category: 'GENERATED_PDF',
+      uploadedById: 'submitter',
+    });
+    expect(drive.uploads).toBe(1);
+  });
+
+  it('does not generate a final PDF attachment before approval', async () => {
+    const { service, drive } = setup('PENDING_APPROVAL');
+
+    await expect(service.generateFinalPdfAttachment('f1', {
+      id: 'submitter',
+      role: 'SUBMITTER',
+    })).rejects.toMatchObject({
       statusCode: 409,
       code: 'FORM_NOT_APPROVED',
     });
@@ -124,6 +159,33 @@ describe('final PDF service', () => {
     });
     await expect(service.generateAndStoreFinalPdf('f1', actor)).rejects.toThrow('pdf failed');
     expect(AppError).toBeDefined();
+  });
+
+  it('retries PDF generation for an approved contract without duplicating the final PDF', async () => {
+    const drive = new FakeDrive();
+    const documents = new DocumentService({ drive, repository: new InMemoryAttachmentRepository() });
+    const generate = vi.fn()
+      .mockRejectedValueOnce(new Error('temporary PDF failure'))
+      .mockResolvedValueOnce(Buffer.from('%PDF-retried'));
+    const service = createFinalPdfService({
+      documents,
+      generate,
+      loadForm: async () => form('APPROVED'),
+      loadHistory: async () => history,
+    });
+
+    await expect(service.generatePackage('f1', actor)).rejects.toThrow('temporary PDF failure');
+    expect(drive.uploads).toBe(0);
+
+    const packageFile = await service.generatePackage('f1', actor);
+    expect(Buffer.from(unzipSync(packageFile.content)['Contract_Form.pdf'])).toEqual(Buffer.from('%PDF-retried'));
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(drive.uploads).toBe(1);
+
+    const secondPackage = await service.generatePackage('f1', actor);
+    expect(Buffer.from(unzipSync(secondPackage.content)['Contract_Form.pdf'])).toEqual(Buffer.from('%PDF-retried'));
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(drive.uploads).toBe(1);
   });
 
   it('creates a ZIP with the complete form PDF and original supporting files', async () => {

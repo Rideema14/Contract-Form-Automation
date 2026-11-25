@@ -169,6 +169,9 @@ describe('authentication', () => {
       ...activeUser,
       role: UserRole.ADMIN,
     } as never);
+    vi.spyOn(prisma, '$transaction').mockImplementation(
+      async (callback) => callback(prisma as never) as never,
+    );
     vi.spyOn(prisma.user, 'update').mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError('Record to update not found', {
         code: 'P2025',

@@ -50,7 +50,7 @@ No substitutions or unnecessary libraries without a documented technical reason.
 | CL-10 | Contract reference/number format and who generates it. | Forms |
 | CL-11 | Currencies supported and whether exchange rates are needed. | Forms, amounts |
 | CL-12 | Technical/commercial evaluation criteria, scoring scale and weighting. | Evaluations |
-| CL-13 | Excel estimate template: required columns, and whether rows are parsed into the cost breakdown or stored only as a file. | Cost estimates |
+| CL-13 | **Resolved:** provide an `.xlsx` template with Description, Quantity and Unit Cost columns; import validates and appends up to 500 cost rows, calculating Amount from Quantity × Unit Cost. Manual cost entry remains available. | Cost estimates |
 | CL-14 | **Resolved:** PDF, Excel, CSV, Word, PNG/JPEG and TXT; 10 MiB per file; 5 files per upload. Contract records, approval history and uploads are retained for the contract lifetime; audit logs are retained at least 7 years. No automatic deletion; authorized deletion must be audited. | Documents |
 | CL-15 | Which Admin permissions apply to forms (view all, edit, delete, override)? | RBAC |
 | CL-16 | **Resolved:** Personal My Drive using OAuth `drive.file` scope and an app-created root folder; no broad Drive access. | Phase 3 |
