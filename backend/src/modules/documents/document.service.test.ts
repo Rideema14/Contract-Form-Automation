@@ -83,7 +83,8 @@ describe('DocumentService', () => {
         throw new Error('db down');
       },
       findById: async () => null,
-      delete: async () => undefined,
+      delete: async () => false,
+      restore: async () => undefined,
       recordAuditEvents: async () => undefined,
     };
     const svc = new DocumentService({ drive, repository: repo });
@@ -117,7 +118,8 @@ describe('DocumentService', () => {
         throw new Error('db down');
       },
       findById: async () => null,
-      delete: async () => undefined,
+      delete: async () => false,
+      restore: async () => undefined,
       recordAuditEvents: async () => undefined,
     };
     const svc = new DocumentService({ drive, repository: repo });
@@ -139,6 +141,39 @@ describe('DocumentService', () => {
     const [rec] = await svc.uploadAttachments({ ...base, files: [await tempFile('a.pdf')] });
     await expect(svc.openAttachment('other', rec.id)).rejects.toBeInstanceOf(AppError);
     expect((await svc.openAttachment('c1', rec.id)).record.id).toBe(rec.id);
+  });
+
+  it('restores attachment metadata when Drive deletion fails', async () => {
+    const drive = new FakeDrive();
+    const repo = new InMemoryAttachmentRepository();
+    const svc = new DocumentService({ drive, repository: repo });
+    const [record] = await svc.uploadAttachments({ ...base, files: [await tempFile('remove.pdf')] });
+    drive.remove = async () => { throw new Error('Drive unavailable'); };
+
+    await expect(svc.deleteAttachment('c1', record.id)).rejects.toMatchObject({
+      statusCode: 502,
+      code: 'DRIVE_DELETE_FAILED',
+    });
+    expect(await repo.findById(record.id)).toEqual(record);
+  });
+
+  it('refuses to delete system-generated PDFs', async () => {
+    const repo = new InMemoryAttachmentRepository();
+    const svc = new DocumentService({ drive: new FakeDrive(), repository: repo });
+    const record = await svc.storeGeneratedFile({
+      contractFormId: 'c1',
+      contractFolderName: 'Office Renovation - c1',
+      category: 'GENERATED_PDF',
+      uploadedById: 'system',
+      fileName: 'Final.pdf',
+      mimeType: 'application/pdf',
+      content: Buffer.from('%PDF-x'),
+    });
+
+    await expect(svc.deleteAttachment('c1', record.id)).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'SYSTEM_ATTACHMENT',
+    });
   });
 
   it('removes all Drive files for an Admin-approved deletion before database cleanup', async () => {

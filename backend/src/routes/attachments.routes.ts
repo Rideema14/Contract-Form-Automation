@@ -90,6 +90,15 @@ router.use(
     authenticate,
     assertCanUpload: (formId, user) => contractService.assertCanUploadAttachments(formId, user as never),
     assertCanView: assertCanViewAttachments,
+    assertCanDelete: (formId, user) => contractService.assertCanDeleteAttachments(formId, user as never),
+    recordDeletion: (formId, attachment, user) =>
+      contractService.recordAttachmentDeletion({
+        formId,
+        attachmentId: attachment.id,
+        actorId: user.id,
+        category: attachment.category,
+        fileName: attachment.fileName,
+      }),
     getContractFolderName: async (formId, user) => {
       const form = await contractService.getContract(formId, user as never);
       return buildContractDriveFolderName(form.id, form.title, form.referenceNo);

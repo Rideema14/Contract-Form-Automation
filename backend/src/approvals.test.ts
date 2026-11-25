@@ -277,6 +277,14 @@ describe('Approval Service - Sequential Workflow & State Transitions', () => {
         data: expect.objectContaining({ recipientId: approver2.id }),
       }),
     );
+    expect(createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          recipientId: submitter.id,
+          message: expect.stringContaining('Level 2'),
+        }),
+      }),
+    );
     expect(result.contractStatus).toBe(ContractStatus.PENDING_APPROVAL);
     expect(result.nextStep).toEqual({
       level: 2,
@@ -673,13 +681,12 @@ describe('Approval Workflow Initialization, Validation, and Resubmission', () =>
     );
 
     expect(steps).toHaveLength(2);
-    expect(mockTx.approvalStep.update).toHaveBeenCalledWith({
+    expect(mockTx.approvalStep.update).not.toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'step-1' },
-      data: expect.objectContaining({ status: ApprovalStatus.PENDING, actedAt: null }),
-    });
+    }));
     expect(mockTx.approvalStep.update).toHaveBeenCalledWith({
       where: { id: 'step-2' },
-      data: expect.objectContaining({ status: ApprovalStatus.WAITING, actedAt: null }),
+      data: expect.objectContaining({ status: ApprovalStatus.PENDING, actedAt: null }),
     });
   });
 
@@ -718,8 +725,11 @@ describe('Approval Workflow Initialization, Validation, and Resubmission', () =>
     );
 
     expect(steps).toHaveLength(3);
-    expect(mockTx.approvalStep.update).toHaveBeenCalledWith({
+    expect(mockTx.approvalStep.update).not.toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'step-1' },
+    }));
+    expect(mockTx.approvalStep.update).toHaveBeenCalledWith({
+      where: { id: 'step-2' },
       data: expect.objectContaining({ status: ApprovalStatus.PENDING, actedAt: null }),
     });
     expect(mockTx.approvalStep.create).toHaveBeenCalledWith(
@@ -741,6 +751,7 @@ describe('Approval Workflow Initialization, Validation, and Resubmission', () =>
     ];
 
     const mockStep3Decision = { id: 'dec-step-3', decision: ApprovalDecisionValue.RETURNED };
+    const createNotification = vi.fn().mockResolvedValue({ id: 'notif-1' });
 
     const mockTxInit = {
       contractForm: {
@@ -764,7 +775,7 @@ describe('Approval Workflow Initialization, Validation, and Resubmission', () =>
           return Promise.resolve(null);
         }),
       },
-      notification: { create: vi.fn().mockResolvedValue({ id: 'notif-1' }) },
+      notification: { create: createNotification },
       auditLog: { create: vi.fn().mockResolvedValue({ id: 'audit-1' }) },
     };
 
@@ -788,56 +799,9 @@ describe('Approval Workflow Initialization, Validation, and Resubmission', () =>
       }),
     );
 
-    // 2. Now simulate Approver 2 approving step-2 in this shortened chain
-    const step2InActiveChain = {
-      id: 'step-2',
-      level: 2,
-      approverId: approver2.id,
-      status: ApprovalStatus.PENDING,
-      contractFormId: 'form-1',
-      contractForm: {
-        id: 'form-1',
-        title: 'Shortened Contract',
-        referenceNo: 'CTR-SHORT',
-        status: ContractStatus.PENDING_APPROVAL,
-        createdById: submitter.id,
-      },
-    };
-
-    const updateContractForm = vi.fn().mockResolvedValue({ id: 'form-1', status: ContractStatus.APPROVED });
-    const createNotification = vi.fn().mockResolvedValue({ id: 'notif-creator' });
-
-    vi.spyOn(prisma, '$transaction').mockImplementation(async (callback) =>
-      callback({
-        approvalStep: {
-          findUnique: vi.fn().mockResolvedValue(step2InActiveChain),
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-          // In the database, step 3 exists with status: RETURNED, actedAt: Date
-          // But findFirst checks { level: 3, status: WAITING, actedAt: null }
-          // Because step 3 is NOT WAITING with actedAt=null, findFirst returns null!
-          findFirst: vi.fn().mockImplementation(({ where }) => {
-            if (where.level === 3 && where.status === ApprovalStatus.WAITING && where.actedAt === null) {
-              return Promise.resolve(null);
-            }
-            return Promise.resolve(null);
-          }),
-        },
-        contractForm: { update: updateContractForm },
-        approvalDecision: { create: vi.fn().mockResolvedValue({ id: 'dec-final' }) },
-        notification: { create: createNotification },
-        auditLog: { create: vi.fn().mockResolvedValue({ id: 'audit-final' }) },
-      } as never),
-    );
-
-    const approveResult = await approveStep('step-2', approver2, { comment: 'Level 2 approves (chain end)' });
-
-    // Contract must become APPROVED
-    expect(approveResult.contractStatus).toBe(ContractStatus.APPROVED);
-    expect(approveResult.nextStep).toBeNull();
-    expect(updateContractForm).toHaveBeenCalledWith({
-      where: { id: 'form-1' },
-      data: { status: ContractStatus.APPROVED },
-    });
+    expect(mockTxInit.contractForm.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: ContractStatus.APPROVED }),
+    }));
     // Notification goes to contract creator, NOT to the old Level 3 approver
     expect(createNotification).toHaveBeenCalledWith(
       expect.objectContaining({

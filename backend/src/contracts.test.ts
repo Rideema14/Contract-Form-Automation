@@ -19,6 +19,7 @@ import {
   updateBidder,
   updateQuotation,
   updateContract,
+  assertCanDeleteAttachments,
 } from './services/contract.service';
 import { initializeOrResetApprovalWorkflow } from './services/approval.service';
 import * as contractService from './services/contract.service';
@@ -68,6 +69,77 @@ describe('contract request validation', () => {
         sortOrder: -1,
       }).success,
     ).toBe(false);
+  });
+});
+
+describe('attachment deletion authorization', () => {
+  it('allows the creator to delete attachments only while the contract is editable', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: submitter.id,
+      status: ContractStatus.DRAFT,
+    } as never);
+
+    await expect(assertCanDeleteAttachments('form-1', submitter)).resolves.toBeUndefined();
+  });
+
+  it('allows Admins to delete attachments on non-editable contracts', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: submitter.id,
+      status: ContractStatus.APPROVED,
+    } as never);
+
+    await expect(assertCanDeleteAttachments('form-1', admin)).resolves.toBeUndefined();
+  });
+
+  it('denies non-creators and creators whose contracts are no longer editable', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: submitter.id,
+      status: ContractStatus.PENDING_APPROVAL,
+    } as never);
+
+    await expect(assertCanDeleteAttachments('form-1', submitter)).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'INVALID_STATE',
+    });
+    await expect(assertCanDeleteAttachments('form-1', approver)).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'FORBIDDEN',
+    });
+  });
+
+  it('rejects deletion for a missing contract', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue(null);
+
+    await expect(assertCanDeleteAttachments('missing-form', submitter)).rejects.toMatchObject({
+      statusCode: 404,
+      code: 'FORM_NOT_FOUND',
+    });
+  });
+
+  it('records attachment deletions in the contract audit history', async () => {
+    const create = vi.spyOn(prisma.auditLog, 'create').mockResolvedValue({ id: 'audit-1' } as never);
+
+    await contractService.recordAttachmentDeletion({
+      formId: 'form-1',
+      attachmentId: 'attachment-1',
+      actorId: admin.id,
+      category: 'SUPPORTING',
+      fileName: 'supporting.pdf',
+    });
+
+    expect(create).toHaveBeenCalledWith({
+      data: {
+        actorId: admin.id,
+        action: 'ATTACHMENT_DELETED',
+        entityType: 'Attachment',
+        entityId: 'attachment-1',
+        contractFormId: 'form-1',
+        details: { category: 'SUPPORTING', fileName: 'supporting.pdf' },
+      },
+    });
   });
 });
 
@@ -733,8 +805,11 @@ describe('contract service authorization and persistence', () => {
         approvalSteps: {
           orderBy: { level: 'asc' },
           include: {
-            approver: { select: { id: true, fullName: true } },
-            decisions: true,
+            approver: { select: { id: true, fullName: true, email: true } },
+            decisions: {
+              orderBy: { createdAt: 'asc' },
+              include: { actor: { select: { id: true, fullName: true, email: true } } },
+            },
           },
         },
       }),
@@ -802,6 +877,38 @@ describe('contract service authorization and persistence', () => {
 
     detail.mockRestore();
     findUnique.mockRestore();
+  });
+
+  it('returns approval steps in level order with decisions for contract details', async () => {
+    vi.spyOn(prisma.contractForm, 'findUnique').mockResolvedValue({
+      id: 'form-1',
+      createdById: submitter.id,
+      status: ContractStatus.PENDING_APPROVAL,
+    } as never);
+    const detail = vi.spyOn(prisma.contractForm, 'findUniqueOrThrow').mockResolvedValue({
+      id: 'form-1',
+      approvalSteps: [
+        { level: 1, status: 'APPROVED', approver: { fullName: 'First Approver' } },
+        { level: 2, status: 'PENDING', approver: { fullName: 'Second Approver' } },
+      ],
+      approvalDecisions: [{ decision: 'APPROVE', comment: 'Reviewed' }],
+    } as never);
+
+    const contract = await getContract('form-1', submitter);
+
+    expect(detail).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({
+        approvalSteps: expect.objectContaining({ orderBy: { level: 'asc' } }),
+        approvalDecisions: expect.objectContaining({ orderBy: { createdAt: 'asc' } }),
+      }),
+    }));
+    expect(contract).toEqual(expect.objectContaining({
+      approvalSteps: expect.arrayContaining([
+        expect.objectContaining({ level: 1, approver: expect.objectContaining({ fullName: 'First Approver' }) }),
+        expect.objectContaining({ level: 2, approver: expect.objectContaining({ fullName: 'Second Approver' }) }),
+      ]),
+      approvalDecisions: expect.arrayContaining([expect.objectContaining({ comment: 'Reviewed' })]),
+    }));
   });
 
   it('rejects a recommended vendor that is not a bidder', async () => {

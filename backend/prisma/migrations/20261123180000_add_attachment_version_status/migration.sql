@@ -1,0 +1,5 @@
+CREATE TYPE "AttachmentStatus" AS ENUM ('ACTIVE', 'ARCHIVED');
+
+ALTER TABLE "Attachment"
+ADD COLUMN "version" INTEGER NOT NULL DEFAULT 1,
+ADD COLUMN "status" "AttachmentStatus" NOT NULL DEFAULT 'ACTIVE';

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, FileDown, LoaderCircle, Plus, Save, Send, Trash2 } from "lucide-react";
+import { ArrowLeft, Download, FileDown, LoaderCircle, Plus, Save, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +22,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { apiErrorMessage } from "@/lib/api-client";
 import {
   createBidder, createContract, createCostLine, createQuotation, deleteBidder,
-  deleteCostLine, deleteQuotation, getContract, getPublishedFormSchema, getReferenceData, saveEvaluations,
+  deleteCostLine, deleteQuotation, downloadCostEstimateTemplate, getContract, getPublishedFormSchema, getReferenceData,
+  importCostEstimate, saveEvaluations,
   submitContract, updateBidder, updateContract, updateCostLine, updateQuotation,
 } from "@/services/contracts";
 import type { Bidder, Contract, ContractDraft, CostLine, DynamicValues, Evaluation, FormSchemaVersion, ReferenceData } from "@/types/contracts";
@@ -46,6 +47,8 @@ const emptyValues: FormValues = {
   referenceNo: "", title: "", sponsorDepartmentId: "", contractCategoryId: "", scope: "",
   procurementRationale: "", contractAmount: "", currencyId: "", recommendedVendorId: "", selectionRationale: "",
   recommendedBidderId: "",
+  budgetProvision: "",
+  taxAmount: "",
 };
 
 function errorMessage(error: unknown, fallback: string) {
@@ -72,6 +75,20 @@ function costTotal(lines: CostLine[]) {
   return `${digits.slice(0, -4)}.${digits.slice(-4)}`;
 }
 
+function sumMoney(values: string[]) {
+  const scaled = values.reduce((sum, value) => {
+    const normalized = /^\d+(?:\.\d{1,4})?$/.test(value) ? value : "0";
+    const [whole, fraction = ""] = normalized.split(".");
+    return sum + BigInt(whole + fraction.padEnd(4, "0").slice(0, 4));
+  }, BigInt(0));
+  const digits = scaled.toString().padStart(5, "0");
+  return `${digits.slice(0, -4)}.${digits.slice(-4)}`;
+}
+
+function totalWithTax(lines: CostLine[], taxAmount: string) {
+  return sumMoney([costTotal(lines), taxAmount || "0"]);
+}
+
 function contractValues(contract: Contract): FormValues {
   return {
     referenceNo: contract.referenceNo ?? "", title: contract.title ?? "",
@@ -80,6 +97,8 @@ function contractValues(contract: Contract): FormValues {
     contractAmount: contract.contractAmount ?? "", currencyId: contract.currencyId ?? "",
     recommendedVendorId: contract.recommendedVendorId ?? "", recommendedBidderId: contract.recommendedBidderId ?? "",
     selectionRationale: contract.selectionRationale ?? "",
+    budgetProvision: contract.budgetProvision ?? "",
+    taxAmount: contract.taxAmount ?? "",
   };
 }
 
@@ -101,6 +120,8 @@ function validate(
   if (!values.scope.trim()) errors.scope = "Scope of work is required.";
   if (!values.procurementRationale.trim()) errors.procurementRationale = "Procurement rationale is required.";
   if (!/^\d+(?:\.\d{1,4})?$/.test(values.contractAmount)) errors.contractAmount = "Enter a non-negative amount with up to 4 decimals.";
+  if (values.budgetProvision && !/^\d+(?:\.\d{1,4})?$/.test(values.budgetProvision)) errors.budgetProvision = "Enter a non-negative budget provision with up to 4 decimals.";
+  if (values.taxAmount && !/^\d+(?:\.\d{1,4})?$/.test(values.taxAmount)) errors.taxAmount = "Enter a non-negative tax amount with up to 4 decimals.";
   if ((values.recommendedVendorId || values.recommendedBidderId) && !values.selectionRationale.trim()) errors.selectionRationale = "Selection rationale is required.";
   if (!bidders.length) errors.bidders = "Bidder Management: add at least one bidder.";
   for (const bidder of bidders) {
@@ -327,7 +348,7 @@ function ReadOnlyContractForm({
         <Card>
           <CardHeader><CardTitle>Budget and Cost Information</CardTitle></CardHeader>
           <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">Tax is not configured; tax is 0.00.</p>
+            <ReadOnlyField label="Budget provision" value={values.budgetProvision} />
             {costLines.length === 0 ? <p className="text-sm text-muted-foreground">No cost lines recorded.</p> : (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[36rem] text-sm">
@@ -337,7 +358,7 @@ function ReadOnlyContractForm({
               </div>
             )}
             <div className="flex flex-wrap justify-end gap-x-6 gap-y-1 border-t pt-3 text-sm">
-              <span>Subtotal: {costTotal(costLines)}</span><span>Tax: 0.0000</span><strong>Total: {costTotal(costLines)}</strong>
+              <span>Subtotal: {costTotal(costLines)}</span><span>Tax: {values.taxAmount}</span><strong>Total: {totalWithTax(costLines, values.taxAmount)}</strong>
             </div>
           </CardContent>
         </Card>
@@ -370,6 +391,7 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
   const [newVendor, setNewVendor] = useState("");
   const [companySelection, setCompanySelection] = useState("");
   const [newCompany, setNewCompany] = useState<CompanyDetails>(emptyCompanyDetails);
+  const [newVendorTypeId, setNewVendorTypeId] = useState("");
   const [quotationDrafts, setQuotationDrafts] = useState<Record<string, QuotationDraft>>({});
   const [costLines, setCostLines] = useState<CostLine[]>([]);
   const [costDraft, setCostDraft] = useState<CostDraft>({ description: "", quantity: "", unitCost: "", amount: "" });
@@ -383,6 +405,8 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
   const [submitReviewOpen, setSubmitReviewOpen] = useState(false);
   const [attachmentLimits, setAttachmentLimits] = useState<UploadLimits | null>(null);
   const [attachmentRefresh, setAttachmentRefresh] = useState(0);
+  const [importingCostEstimate, setImportingCostEstimate] = useState(false);
+  const costEstimateFileRef = useRef<HTMLInputElement>(null);
   const [attachmentsUploading, setAttachmentsUploading] = useState(false);
   const [preDraftUploadsPending, setPreDraftUploadsPending] = useState(false);
   const preDraftUploadsPendingRef = useRef(false);
@@ -429,6 +453,7 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
     ])
       .then(([referenceData, loaded, publishedSchema]) => {
         setRefs(referenceData);
+        setNewVendorTypeId(referenceData.vendorTypes[0]?.id ?? "");
         if (loaded) {
           if (!loaded.formSchemaVersion) {
             throw new Error("This contract's original form configuration is unavailable.");
@@ -492,7 +517,9 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
       contractCategoryId: currentValues.contractCategoryId || null,
       scope: currentValues.scope.trim() || null,
       procurementRationale: currentValues.procurementRationale.trim() || null,
+      budgetProvision: currentValues.budgetProvision.trim() || null,
       contractAmount: currentValues.contractAmount.trim() || null,
+      taxAmount: currentValues.taxAmount.trim() || null,
       currencyId: currentValues.currencyId || null,
       recommendedVendorId: currentValues.recommendedVendorId || null,
       selectionRationale: currentValues.selectionRationale.trim() || null,
@@ -578,7 +605,9 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
         contractCategoryId: body.contractCategoryId || null,
         scope: body.scope.trim() || null,
         procurementRationale: body.procurementRationale.trim() || null,
+        budgetProvision: body.budgetProvision.trim() || null,
         contractAmount: body.contractAmount.trim() || null,
+        taxAmount: body.taxAmount.trim() || null,
         currencyId: body.currencyId || null,
         recommendedVendorId: body.recommendedVendorId || null,
         recommendedBidderId: body.recommendedBidderId || null,
@@ -675,11 +704,16 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
       toast.error("Enter a company name for the new company.");
       return;
     }
+    if (companySelection === "__new__" && !newVendorTypeId) {
+      toast.error("Select a vendor type for the new company.");
+      return;
+    }
     const selectedCompany = refs?.vendors.find((vendor) => vendor.id === companySelection);
     const existingContact = companyContactFields(selectedCompany?.contactDetails);
     try {
       const bidder = await createBidder(form.id, {
         vendorId: companySelection === "__new__" ? null : newVendor || null,
+        vendorTypeId: companySelection === "__new__" ? newVendorTypeId : null,
         companyName: companySelection === "__new__" ? newCompany.companyName : undefined,
         contactPerson: companySelection === "__new__" ? newCompany.contactPerson || null : existingContact.contactPerson || null,
         email: companySelection === "__new__" ? newCompany.email || null : existingContact.email || null,
@@ -690,6 +724,7 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
       setNewVendor("");
       setCompanySelection("");
       setNewCompany(emptyCompanyDetails);
+      setNewVendorTypeId(refs?.vendorTypes[0]?.id ?? "");
       toast.success("Bidder added.");
     } catch (createError) {
       toast.error(errorMessage(createError, "Unable to add bidder."));
@@ -803,6 +838,26 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
       setCostLines((current) => current.filter((item) => item.id !== line.id));
     } catch (removeError) {
       toast.error(errorMessage(removeError, "Unable to remove cost line."));
+    }
+  }
+
+  async function importCostRows(file: File) {
+    if (!file.name.toLowerCase().endsWith(".xlsx")) {
+      toast.error("Choose an .xlsx cost estimate file.");
+      return;
+    }
+    setImportingCostEstimate(true);
+    try {
+      const saved = contract?.id ? contract : await persistMain();
+      const imported = await importCostEstimate(saved.id, file);
+      setCostLines((current) =>
+        [...current, ...imported].sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id)),
+      );
+      toast.success(`${imported.length} cost row${imported.length === 1 ? "" : "s"} imported.`);
+    } catch (caught) {
+      toast.error(errorMessage(caught, "Unable to import the cost estimate."));
+    } finally {
+      setImportingCostEstimate(false);
     }
   }
 
@@ -1023,6 +1078,7 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
             <CardTitle className="text-lg font-semibold">Financial and vendor recommendation</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-5 pt-5 md:grid-cols-2">
+            {input("budgetProvision", "Budget provision (planned total)", "number")}
             {input("contractAmount", "Estimated contract amount", "number")}
             {select("currencyId", "Currency", (refs?.currencies ?? []).map((item) => ({ id: item.id, name: `${item.code} - ${item.name}` })), "Select currency")}
             <div className="space-y-1.5">
@@ -1095,12 +1151,29 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
                 </Button>
               </div>
               {companySelection === "__new__" && (
-                <CompanyDetailsFields
-                  value={newCompany}
-                  onChange={setNewCompany}
-                  idPrefix="new-company"
-                  className="grid gap-3 rounded-lg border border-border bg-muted/20 p-4 md:grid-cols-2"
-                />
+                <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
+                  <CompanyDetailsFields
+                    value={newCompany}
+                    onChange={setNewCompany}
+                    idPrefix="new-company"
+                    className="grid gap-3 md:grid-cols-2"
+                  />
+                  <div className="space-y-1.5">
+                    <Label htmlFor="new-company-vendor-type">Vendor type</Label>
+                    <select
+                      id="new-company-vendor-type"
+                      className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
+                      value={newVendorTypeId}
+                      onChange={(event) => setNewVendorTypeId(event.target.value)}
+                      required
+                    >
+                      <option value="">Select vendor type</option>
+                      {(refs?.vendorTypes ?? []).map((vendorType) => (
+                        <option key={vendorType.id} value={vendorType.id}>{vendorType.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
               )}
               {companySelection && companySelection !== "__new__" && (() => {
                 const company = refs?.vendors.find((vendor) => vendor.id === companySelection);
@@ -1110,6 +1183,7 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
                   <div className="rounded-lg border border-border bg-muted/20 p-4" aria-live="polite">
                     <p className="font-medium">{company.name}</p>
                     <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+                      <div><dt className="text-xs text-muted-foreground">Vendor type</dt><dd>{company.vendorType?.name || "—"}</dd></div>
                       <div><dt className="text-xs text-muted-foreground">Contact Person</dt><dd>{details.contactPerson || "—"}</dd></div>
                       <div><dt className="text-xs text-muted-foreground">Email</dt><dd>{details.email || "—"}</dd></div>
                       <div><dt className="text-xs text-muted-foreground">Phone</dt><dd>{details.phone || "—"}</dd></div>
@@ -1210,7 +1284,7 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
           </CardHeader>
           <CardContent className="space-y-4 pt-5">
             <AttachmentUploader formId={activeContractId} limits={attachmentLimits} onUploaded={() => setAttachmentRefresh((value) => value + 1)} onUploadStateChange={setAttachmentsUploading} onPreDraftPendingChange={updatePreDraftUploadsPending} />
-            {activeContractId && <AttachmentList formId={activeContractId} refreshKey={attachmentRefresh} />}
+            {activeContractId && <AttachmentList formId={activeContractId} refreshKey={attachmentRefresh} canDelete={isEditable} />}
           </CardContent>
         </Card>
 
@@ -1236,7 +1310,59 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
             <CardTitle className="text-lg font-semibold">Budget and cost information</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5 pt-5">
-            <p className="text-xs text-muted-foreground">Tax is not configured; tax is 0.00.</p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="taxAmount">Tax amount (manual entry)</Label>
+                <Input
+                  id="taxAmount"
+                  type="number"
+                  min="0"
+                  step="0.0001"
+                  value={values.taxAmount}
+                  onChange={(event) => setValue("taxAmount", event.target.value)}
+                />
+              </div>
+            </div>
+            <div className="space-y-2 rounded-lg border border-border p-3">
+              <p className="text-sm font-medium">Import cost rows from Excel</p>
+              <p className="text-xs text-muted-foreground">
+                Download the template, fill in Description, Quantity, and Unit Cost, then import it. Imported rows are added to existing rows.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy || importingCostEstimate}
+                  onClick={() => void downloadCostEstimateTemplate().catch((caught) =>
+                    toast.error(errorMessage(caught, "Unable to download the Excel template.")),
+                  )}
+                >
+                  <Download />Download Excel template
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy || importingCostEstimate}
+                  onClick={() => costEstimateFileRef.current?.click()}
+                >
+                  {importingCostEstimate ? <LoaderCircle className="animate-spin" /> : null}
+                  {importingCostEstimate ? "Importing..." : "Import cost rows"}
+                </Button>
+                <input
+                  ref={costEstimateFileRef}
+                  type="file"
+                  accept=".xlsx"
+                  className="sr-only"
+                  aria-label="Excel cost estimate file"
+                  disabled={busy || importingCostEstimate}
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0];
+                    event.currentTarget.value = "";
+                    if (file) void importCostRows(file);
+                  }}
+                />
+              </div>
+            </div>
             {costLines.length > 0 && (
               <div className="divide-y divide-border rounded-lg border border-border">
                 {costLines.map((line) => (
@@ -1287,8 +1413,8 @@ export function ContractEditor({ contractId, edit = true, readOnly = false, retu
             </div>
             <div className="flex flex-wrap justify-end gap-x-8 gap-y-2 rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm tabular-nums">
               <span className="text-muted-foreground">Subtotal: <strong className="text-foreground">{costTotal(costLines)}</strong></span>
-              <span className="text-muted-foreground">Tax: <strong className="text-foreground">0.0000</strong></span>
-              <span className="text-base font-bold text-foreground">Total: {costTotal(costLines)}</span>
+              <span className="text-muted-foreground">Tax: <strong className="text-foreground">{sumMoney([values.taxAmount || "0"])}</strong></span>
+              <span className="text-base font-bold text-foreground">Total: {totalWithTax(costLines, values.taxAmount)}</span>
             </div>
           </CardContent>
         </Card>

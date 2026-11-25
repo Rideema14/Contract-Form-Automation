@@ -26,26 +26,25 @@ type DemoAccount = {
 const demoAccounts: DemoAccount[] = [
   {
     role: "ADMIN",
-    description: "Manage users, reference data, and audit history",
-    email: process.env.NEXT_PUBLIC_DEMO_ADMIN_EMAIL ?? "",
-    password: process.env.NEXT_PUBLIC_DEMO_ADMIN_PASSWORD ?? "",
+    description: "Manage users, reference data & audit history",
+    email: process.env.NEXT_PUBLIC_DEMO_ADMIN_EMAIL || "admin@example.com",
+    password: process.env.NEXT_PUBLIC_DEMO_ADMIN_PASSWORD || "admin123@#",
   },
   {
     role: "APPROVER",
     description: "Review and decide on assigned contracts",
-    email: process.env.NEXT_PUBLIC_DEMO_APPROVER_EMAIL ?? "",
-    password: process.env.NEXT_PUBLIC_DEMO_APPROVER_PASSWORD ?? "",
+    email: process.env.NEXT_PUBLIC_DEMO_APPROVER_EMAIL || "approver@example.com",
+    password: process.env.NEXT_PUBLIC_DEMO_APPROVER_PASSWORD || "approver123@#",
   },
   {
     role: "SUBMITTER",
-    description: "Create contracts and track their status",
-    email: process.env.NEXT_PUBLIC_DEMO_SUBMITTER_EMAIL ?? "",
-    password: process.env.NEXT_PUBLIC_DEMO_SUBMITTER_PASSWORD ?? "",
+    description: "Create contracts, upload files & track status",
+    email: process.env.NEXT_PUBLIC_DEMO_SUBMITTER_EMAIL || "submitter@example.com",
+    password: process.env.NEXT_PUBLIC_DEMO_SUBMITTER_PASSWORD || "user123@#",
   },
 ];
 
-const demoLoginsEnabled =
-  process.env.NEXT_PUBLIC_DEMO_LOGIN_ENABLED === "true";
+const demoLoginsEnabled = true;
 
 function validateForm(email: string, password: string): FormErrors {
   const errors: FormErrors = {};

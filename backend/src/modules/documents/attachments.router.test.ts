@@ -54,6 +54,7 @@ let drive: FakeDrive;
 let packageCalls: string[];
 let currentPdfCalls: string[];
 let finalPdfCalls: string[];
+let deletionEvents: string[];
 
 function app() {
   return appWithDocuments().app;
@@ -64,6 +65,7 @@ function appWithDocuments() {
   packageCalls = [];
   currentPdfCalls = [];
   finalPdfCalls = [];
+  deletionEvents = [];
   const service = new DocumentService({ drive, repository: new InMemoryAttachmentRepository() });
   const a = express();
   a.use(
@@ -77,6 +79,14 @@ function appWithDocuments() {
       },
       assertCanView: async (formId, user) => {
         if (formId !== FORM || user.id === 'outsider') throw new AppError(403, 'FORBIDDEN', 'not allowed');
+      },
+      assertCanDelete: async (formId, user) => {
+        if (formId !== FORM || (user.id !== 'owner' && user.role !== 'ADMIN')) {
+          throw new AppError(403, 'FORBIDDEN', 'not allowed');
+        }
+      },
+      recordDeletion: async (_formId, attachment) => {
+        deletionEvents.push(attachment.id);
       },
       getContractFolderName: async () => 'CF-2026-0001 - Office Renovation - 11111111',
       upload: createDocumentUploadMiddleware(config, 'files'),
@@ -241,6 +251,48 @@ describe('attachments router', () => {
     expect(response.headers['content-disposition']).toContain('attachment;');
     expect(response.body.toString()).toBe('%PDF-approved-contract');
     expect(denied.status).toBe(403);
+  });
+
+  it('deletes user attachments and records the deletion, but denies unauthorized users', async () => {
+    const a = app();
+    const uploaded = await upload(a);
+    const id = uploaded.body.data[0].id;
+
+    const denied = await request(a)
+      .delete(`/api/forms/${FORM}/attachments/${id}`)
+      .set({ 'x-user': 'outsider:SUBMITTER' });
+    expect(denied.status).toBe(403);
+    expect(drive.files.size).toBe(1);
+    expect(deletionEvents).toEqual([]);
+
+    const removed = await request(a)
+      .delete(`/api/forms/${FORM}/attachments/${id}`)
+      .set(owner);
+    expect(removed.status).toBe(200);
+    expect(removed.body.data).toEqual({ id });
+    expect(drive.files.size).toBe(0);
+    expect(deletionEvents).toEqual([id]);
+  });
+
+  it('does not allow deleting system-generated PDFs', async () => {
+    const { app: a, service } = appWithDocuments();
+    const pdf = await service.storeGeneratedFile({
+      contractFormId: FORM,
+      contractFolderName: 'CF-2026-0001 - Office Renovation - 11111111',
+      category: 'GENERATED_PDF',
+      uploadedById: 'system',
+      fileName: 'Contract_Final.pdf',
+      mimeType: PDF,
+      content: Buffer.from('%PDF-approved-contract'),
+    });
+
+    const response = await request(a)
+      .delete(`/api/forms/${FORM}/attachments/${pdf.id}`)
+      .set({ 'x-user': 'admin:ADMIN' });
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe('SYSTEM_ATTACHMENT');
+    expect(drive.files.size).toBe(1);
+    expect(deletionEvents).toEqual([]);
   });
 
   it('allows the contract creator to download a current PDF snapshot', async () => {

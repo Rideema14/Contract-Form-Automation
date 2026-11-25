@@ -6,12 +6,14 @@ import {
   createContract,
   createCostLine,
   createQuotation,
+  downloadCostEstimateTemplate,
   deleteBidder,
   deleteContract,
   deleteCostLine,
   deleteQuotation,
   getContract,
   getCostEstimate,
+  importCostEstimate,
   listBidders,
   listContracts,
   listCostLines,
@@ -26,6 +28,7 @@ import {
   updateCostLine,
   updateQuotation,
 } from '../controllers/contracts.controller';
+import { uploadCostEstimateWorkbook } from '../modules/documents/cost-estimate-upload';
 
 const router = Router();
 
@@ -52,10 +55,12 @@ router.delete('/:formId/bidders/:bidderId/quotations/:quotationId', deleteQuotat
 
 router.get('/:formId/cost-lines', listCostLines);
 router.post('/:formId/cost-lines', createCostLine);
+router.post('/:formId/cost-lines/import', uploadCostEstimateWorkbook, importCostEstimate);
 router.patch('/:formId/cost-lines/:lineId', updateCostLine);
 router.delete('/:formId/cost-lines/:lineId', deleteCostLine);
 
 router.get('/:formId/cost-estimate', getCostEstimate);
+router.get('/cost-estimate/template', downloadCostEstimateTemplate);
 router.get('/:formId/evaluations', listEvaluations);
 router.put('/:formId/evaluations', saveEvaluations);
 

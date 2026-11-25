@@ -8,6 +8,7 @@ import { AppError } from '../utils/app-error';
 import { recordAuditEvent } from './audit.service';
 import { ContractDraftInput, CreateContractInput } from '../schemas/contract.schema';
 import { formSchemaDefinitionSchema } from '../schemas/form-builder.schema';
+import type { CostEstimateRowInput } from './cost-estimate-excel.service';
 import {
   getLatestFormSchema,
   normalizeDynamicValues,
@@ -186,6 +187,41 @@ export async function assertCanViewAttachments(
   await getAccessibleForm(formId, user);
 }
 
+/** Admins may delete user-uploaded attachments; creators may do so while the form is editable. */
+export async function assertCanDeleteAttachments(
+  formId: string,
+  user: AuthUser
+): Promise<void> {
+  assertAuthenticated(user);
+  if (user.role === UserRole.ADMIN) {
+    await getAccessibleForm(formId, user);
+    return;
+  }
+  await getEditableForm(formId, user);
+}
+
+export async function recordAttachmentDeletion(input: {
+  formId: string;
+  attachmentId: string;
+  actorId: string;
+  category: string;
+  fileName: string;
+}): Promise<void> {
+  await prisma.auditLog.create({
+    data: {
+      actorId: input.actorId,
+      action: 'ATTACHMENT_DELETED',
+      entityType: 'Attachment',
+      entityId: input.attachmentId,
+      contractFormId: input.formId,
+      details: {
+        category: input.category,
+        fileName: input.fileName,
+      },
+    },
+  });
+}
+
 async function getAccessibleForm(formId: string, user: AuthUser) {
   assertAuthenticated(user);
 
@@ -296,7 +332,9 @@ export async function createDraft(
           referenceNo,
           formSchemaVersionId: latestSchema.id,
           dynamicValues: normalizedValues as Prisma.InputJsonValue,
+          budgetProvision: decimal(input.budgetProvision),
           contractAmount: decimal(input.contractAmount),
+          taxAmount: decimal(input.taxAmount) ?? new Prisma.Decimal(0),
           createdById: user.id,
           status: ContractStatus.DRAFT,
         },
@@ -505,16 +543,27 @@ export async function getContract(formId: string, user: AuthUser) {
         orderBy: { level: 'asc' },
         include: {
           approver: {
-            select: {
-              id: true,
-              fullName: true,
+            select: { id: true, fullName: true, email: true },
+          },
+          decisions: {
+            orderBy: { createdAt: 'asc' },
+            include: {
+              actor: {
+                select: { id: true, fullName: true, email: true },
+              },
             },
           },
-          decisions: true,
         },
       },
       formSchemaVersion: true,
-      approvalDecisions: true,
+      approvalDecisions: {
+        orderBy: { createdAt: 'asc' },
+        include: {
+          actor: {
+            select: { id: true, fullName: true, email: true },
+          },
+        },
+      },
       auditLogs: {
         orderBy: { createdAt: 'asc' },
         include: {
@@ -578,7 +627,6 @@ export async function updateContract(
           contractFormId: formId,
         },
       });
-
       if (!bidder) {
         throw new AppError(
           409,
@@ -598,10 +646,10 @@ export async function updateContract(
     }
   }
 
-  if (input.referenceNo && !form.referenceNo) {
+  if (input.referenceNo?.trim() && !form.referenceNo) {
     const existing = await prisma.contractForm.findFirst({
       where: {
-        referenceNo: input.referenceNo,
+        referenceNo: input.referenceNo.trim(),
         id: { not: formId },
       },
       select: { id: true },
@@ -618,13 +666,25 @@ export async function updateContract(
 
   try {
     return await prisma.$transaction(async (tx) => {
+      const {
+        contractAmount,
+        budgetProvision,
+        taxAmount,
+        ...nonMonetaryInput
+      } = normalizedInput;
       const updated = await tx.contractForm.update({
         where: { id: formId },
         data: {
-          ...normalizedInput,
+          ...nonMonetaryInput,
           ...(normalizedDynamicValues !== undefined ? { dynamicValues: normalizedDynamicValues } : {}),
           ...(Object.prototype.hasOwnProperty.call(input, 'contractAmount')
-            ? { contractAmount: decimal(input.contractAmount) }
+            ? { contractAmount: decimal(contractAmount) }
+            : {}),
+          ...(Object.prototype.hasOwnProperty.call(input, 'budgetProvision')
+            ? { budgetProvision: decimal(budgetProvision) }
+            : {}),
+          ...(Object.prototype.hasOwnProperty.call(input, 'taxAmount')
+            ? { taxAmount: decimal(taxAmount) ?? new Prisma.Decimal(0) }
             : {}),
         },
       });
@@ -878,6 +938,10 @@ async function validateSubmission(formId: string) {
     requiredDecimal(form.contractAmount, 'contractAmount'),
     'contractAmount'
   );
+  if (form.budgetProvision != null) {
+    assertNonNegative(form.budgetProvision, 'budgetProvision');
+  }
+  assertNonNegative(form.taxAmount ?? new Prisma.Decimal(0), 'taxAmount');
 
   if (
     (form.recommendedVendorId || form.recommendedBidderId) &&
@@ -1062,6 +1126,7 @@ export async function createBidder(
   user: AuthUser,
   input: {
     vendorId?: string | null;
+    vendorTypeId?: string | null;
     companyName?: string;
     contactPerson?: string | null;
     email?: string | null;
@@ -1071,6 +1136,7 @@ export async function createBidder(
   }
 ) {
   await getEditableForm(formId, user);
+  const { vendorTypeId: _vendorTypeId, ...bidderInput } = input;
 
   const vendor = input.vendorId
     ? await prisma.vendor.findUnique({
@@ -1124,9 +1190,33 @@ export async function createBidder(
     });
     const sortOrder = (last._max.sortOrder ?? -1) + 1;
 
+    let bidderVendorId = input.vendorId;
+    if (!bidderVendorId && input.vendorTypeId) {
+      const vendorType = await tx.vendorType.findUnique({
+        where: { id: input.vendorTypeId },
+      });
+      if (!vendorType) {
+        throw new AppError(404, 'VENDOR_TYPE_NOT_FOUND', 'Vendor type not found');
+      }
+      const createdVendor = await tx.vendor.create({
+        data: {
+          name: companyName,
+          vendorTypeId: input.vendorTypeId,
+          contactDetails: {
+            contactPerson: input.contactPerson || null,
+            email: input.email || null,
+            phone: input.phone || null,
+            qualifications: input.qualifications || null,
+          },
+        },
+      });
+      bidderVendorId = createdVendor.id;
+    }
+
     const created = await tx.bidder.create({
       data: {
-        ...input,
+        ...bidderInput,
+        vendorId: bidderVendorId,
         sortOrder,
         companyName,
         contractFormId: formId,
@@ -1521,7 +1611,7 @@ export async function getCostEstimate(
   formId: string,
   user: AuthUser
 ) {
-  await getAccessibleForm(formId, user);
+  const form = await getAccessibleForm(formId, user);
 
   const lines = await prisma.costLine.findMany({
     where: { contractFormId: formId },
@@ -1532,12 +1622,13 @@ export async function getCostEstimate(
     (total, line) => total.add(line.amount),
     new Prisma.Decimal(0)
   );
+  const tax = form.taxAmount ?? new Prisma.Decimal(0);
 
   return {
     lines,
     subtotal,
-    tax: new Prisma.Decimal(0),
-    total: subtotal,
+    tax,
+    total: subtotal.add(tax),
   };
 }
 
@@ -1576,6 +1667,39 @@ export async function createCostLine(
       entityId: created.id,
       contractFormId: formId,
     });
+    return created;
+  });
+}
+
+export async function importCostLines(
+  formId: string,
+  user: AuthUser,
+  rows: CostEstimateRowInput[],
+) {
+  await getEditableForm(formId, user);
+
+  return prisma.$transaction(async (tx) => {
+    const last = await tx.costLine.aggregate({
+      where: { contractFormId: formId },
+      _max: { sortOrder: true },
+    });
+    const firstSortOrder = (last._max.sortOrder ?? -1) + 1;
+    const created = [];
+
+    for (const [index, row] of rows.entries()) {
+      const amount = calculateCostAmount(row.quantity, row.unitCost);
+      created.push(await tx.costLine.create({
+        data: {
+          contractFormId: formId,
+          description: row.description,
+          quantity: new Prisma.Decimal(row.quantity),
+          unitCost: new Prisma.Decimal(row.unitCost),
+          amount,
+          sortOrder: firstSortOrder + index,
+        },
+      }));
+    }
+
     return created;
   });
 }

@@ -106,6 +106,35 @@ export function listAttachments(formId: string): Promise<Attachment[]> {
   return apiGet<Attachment[]>(base(formId));
 }
 
+export async function deleteAttachment(formId: string, attachmentId: string): Promise<{ id: string }> {
+  const response = await fetch(`${API_BASE_URL}${base(formId)}/${encodeURIComponent(attachmentId)}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  const payload: unknown = await response.json().catch(() => undefined);
+  if (!response.ok) {
+    const error: ApiErrorResponse =
+      payload && typeof payload === "object" && "message" in payload
+        ? (payload as ApiErrorResponse)
+        : { success: false, message: `Delete failed (${response.status})`, error: { code: "HTTP_ERROR", details: [] } };
+    throw new ApiError(error, response.status);
+  }
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    !("success" in payload) ||
+    payload.success !== true ||
+    !("data" in payload) ||
+    typeof payload.data !== "object" ||
+    payload.data === null ||
+    !("id" in payload.data) ||
+    typeof payload.data.id !== "string"
+  ) {
+    throw new Error("The server returned an invalid attachment deletion response.");
+  }
+  return { id: payload.data.id };
+}
+
 export function getAttachmentViewUrl(formId: string, attachmentId: string): string {
   return `${API_BASE_URL}${base(formId)}/${encodeURIComponent(attachmentId)}/view`;
 }

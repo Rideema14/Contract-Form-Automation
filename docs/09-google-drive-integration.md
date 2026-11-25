@@ -38,6 +38,7 @@ Validation checks extension, reported MIME type, filename, size, and request fil
 ## Application Routes
 - `POST /api/forms/:formId/attachments` — contract creator or Admin upload while the form is editable (`DRAFT` or `RETURNED`); multipart fields are `category`, repeated `displayNames`, and repeated `files`.
 - `GET /api/forms/:formId/attachments` — metadata for the contract creator, an assigned approver, or Admin.
+- `DELETE /api/forms/:formId/attachments/:attachmentId` — Admin or contract creator on a draft/returned form; removes a user-uploaded file and records deletion in audit history. Generated PDFs cannot be removed individually.
 - `GET /api/forms/:formId/attachments/:attachmentId/view` — inline view for supported types, after the same access check.
 - `GET /api/forms/:formId/attachments/:attachmentId/download` — backend-mediated download, after the same access check.
 - `GET /api/forms/:formId/pdf` — creator, assigned approver, or Admin downloads a current saved-contract snapshot; it is generated on demand and is not stored in Drive.
@@ -45,7 +46,7 @@ Validation checks extension, reported MIME type, filename, size, and request fil
 - `POST /api/forms/:formId/final-pdf` — Admin or assigned Approver downloads a ZIP containing the final contract PDF and all supporting files. The existing final PDF is reused; if none exists, the normal PDF service creates and stores it first. Final approval also triggers PDF generation automatically.
 - `DELETE /api/forms/:formId` — Admin only; requires a reason and explicit confirmation, removes Drive files before database records, and retains prior audit events plus an audit event for the deletion.
 
-The backend checks form access on every list, view, and download request, and verifies that the attachment belongs to the requested form. It returns safe metadata only and never returns the Drive ID. Files remain private in Drive; users access them only through these checked backend routes.
+The backend checks form access on every list, delete, view, and download request, and verifies that the attachment belongs to the requested form. A mismatched attachment/form ID is treated as not found. It returns safe metadata only and never returns the Drive ID. Files remain private in Drive; users access them only through these checked backend routes.
 
 ## Remaining External Verification
 1. Configure OAuth credentials only in local/deployment secrets; leave the folder ID blank to use an app-owned root under `drive.file`.

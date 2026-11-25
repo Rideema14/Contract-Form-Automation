@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   ChevronLeft,
   ChevronRight,
   Eye,
   FileText,
+  LogOut,
   Pencil,
   Plus,
   RefreshCw,
@@ -57,6 +58,7 @@ import {
 } from "@/components/ui/table";
 import { ApiError } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
+import { logout } from "@/services/auth";
 import { deleteContract, listContracts } from "@/services/contracts";
 import type {
   Contract,
@@ -99,6 +101,7 @@ function getErrorMessage(error: unknown): string {
 }
 
 export default function ContractsPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { authUser } = useAuth();
   const [contracts, setContracts] = useState<Contract[]>([]);
@@ -123,6 +126,7 @@ export default function ContractsPage() {
   const [deletionReason, setDeletionReason] = useState("");
   const [deletionConfirmed, setDeletionConfirmed] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const isAdmin = authUser?.role === "ADMIN";
   const hasActiveFilters = Boolean(query) || status !== "ALL";
 
@@ -180,6 +184,22 @@ export default function ContractsPage() {
     setPage(1);
   }
 
+  async function handleLogout() {
+    setIsLoggingOut(true);
+    try {
+      await logout();
+      router.replace("/login");
+    } catch (logoutError) {
+      toast.error(
+        logoutError instanceof ApiError
+          ? logoutError.message
+          : "Could not sign out.",
+      );
+    } finally {
+      setIsLoggingOut(false);
+    }
+  }
+
   async function confirmDelete() {
     const canDelete =
       isAdmin ||
@@ -194,7 +214,6 @@ export default function ContractsPage() {
     ) {
       return;
     }
-
     setIsDeleting(true);
     try {
       await deleteContract(deleteTarget.id, {
@@ -246,6 +265,15 @@ export default function ContractsPage() {
             >
               <RefreshCw className={`size-4 ${isLoading ? "animate-spin" : ""}`} />
               Refresh
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleLogout()}
+              disabled={isLoggingOut}
+            >
+              <LogOut className="size-4" />
+              {isLoggingOut ? "Signing out..." : "Sign out"}
             </Button>
             <NewContractLink className={buttonVariants()}>
               <Plus className="size-4" />
@@ -401,6 +429,8 @@ export default function ContractsPage() {
                         <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
                           <span>Amount: {formatAmount(contract)}</span>
                           <span>Updated: {formatDate(contract.updatedAt)}</span>
+                          <span>Vendor: {contract.recommendedVendor?.name ?? "—"}</span>
+                          <span>Submitted: {contract.submittedAt ? formatDate(contract.submittedAt) : "—"}</span>
                         </div>
                         <div className="flex flex-wrap gap-2 pt-1">
                           <Link href={`/contracts/${contract.id}?return=${encodeURIComponent("/contracts")}`} className={buttonVariants({ variant: "outline", size: "sm" })}>
@@ -430,7 +460,9 @@ export default function ContractsPage() {
                     <TableHead className="font-semibold">Amount</TableHead>
                     <TableHead className="font-semibold">Department</TableHead>
                     <TableHead className="font-semibold">Category</TableHead>
+                    <TableHead className="font-semibold">Vendor</TableHead>
                     <TableHead className="font-semibold">Status</TableHead>
+                    <TableHead className="font-semibold">Submitted</TableHead>
                     <TableHead className="font-semibold">Updated</TableHead>
                     <TableHead className="text-right font-semibold">Actions</TableHead>
                   </TableRow>
@@ -468,10 +500,14 @@ export default function ContractsPage() {
                             contract.contractCategoryId ??
                             "—"}
                         </TableCell>
+                        <TableCell>{contract.recommendedVendor?.name ?? "—"}</TableCell>
                         <TableCell>
                           <Badge variant={statusBadgeVariant(contract.status)}>
                             {statusLabels[contract.status]}
                           </Badge>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">
+                          {contract.submittedAt ? formatDate(contract.submittedAt) : "—"}
                         </TableCell>
                         <TableCell className="whitespace-nowrap text-muted-foreground">
                           {formatDate(contract.updatedAt)}

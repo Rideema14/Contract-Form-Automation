@@ -19,6 +19,10 @@ export interface AttachmentsRouterDeps {
   assertCanUpload(formId: string, user: AccessUser): Promise<void>;
   /** Admin, creator or assigned approver. */
   assertCanView(formId: string, user: AccessUser): Promise<void>;
+  /** Admin, or the creator while the contract is DRAFT or RETURNED. */
+  assertCanDelete(formId: string, user: AccessUser): Promise<void>;
+  /** Records a completed attachment deletion in the contract audit history. */
+  recordDeletion(formId: string, attachment: AttachmentRecord, user: AccessUser): Promise<void>;
   /** Returns a safe, human-readable Drive folder name for this authorized contract. */
   getContractFolderName(formId: string, user: AccessUser): Promise<string>;
   /** configured Multer middleware (field "files"). */
@@ -82,6 +86,7 @@ function contentDisposition(type: 'attachment' | 'inline', fileName: string): st
  * Routes (mounted under /api/forms):
  *   POST /:formId/attachments                       multipart: files + category + repeated displayNames
  *   GET  /:formId/attachments
+ *   DELETE /:formId/attachments/:attachmentId
  *   GET  /:formId/attachments/:attachmentId/download
  *   GET  /:formId/attachments/:attachmentId/view
  *   GET  /:formId/pdf                              current contract PDF snapshot
@@ -89,7 +94,7 @@ function contentDisposition(type: 'attachment' | 'inline', fileName: string): st
  *   POST /:formId/final-pdf                          ADMIN or assigned APPROVER
  */
 export function createAttachmentsRouter(deps: AttachmentsRouterDeps): Router {
-  const { service, authenticate, assertCanUpload, assertCanView, upload } = deps;
+  const { service, authenticate, assertCanUpload, assertCanView, assertCanDelete, upload } = deps;
   const router = Router();
 
   const guard =
@@ -148,6 +153,32 @@ export function createAttachmentsRouter(deps: AttachmentsRouterDeps): Router {
     sendSuccess(req, res, 200, 'Attachments retrieved', records.map(toPublicAttachment));
   });
 
+  router.delete(
+    '/:formId/attachments/:attachmentId',
+    authenticate,
+    guard(assertCanDelete),
+    async (req, res) => {
+      const { formId, attachmentId } = parse(attachmentParams, req.params, 'Invalid identifiers');
+      const user = currentUser(req);
+      const record = await service.deleteAttachment(formId, attachmentId);
+      try {
+        await deps.recordDeletion(formId, record, user);
+      } catch (error) {
+        console.error('Failed to record attachment deletion in audit history', {
+          formId,
+          attachmentId,
+          error,
+        });
+        throw new AppError(
+          500,
+          'ATTACHMENT_AUDIT_FAILED',
+          'The attachment was deleted, but its audit record could not be saved. Contact an administrator.'
+        );
+      }
+      sendSuccess(req, res, 200, 'Attachment deleted', { id: record.id });
+    }
+  );
+
   const send =
     (mode: 'download' | 'view'): RequestHandler =>
     async (req, res) => {
@@ -199,10 +230,10 @@ export function createAttachmentsRouter(deps: AttachmentsRouterDeps): Router {
     const generatePackage = deps.generatePackage;
     router.post('/:formId/final-pdf', authenticate, async (req, res) => {
       const user = currentUser(req);
+      const { formId } = parse(formParams, req.params, 'Invalid contract form ID');
       if (user.role !== 'ADMIN' && user.role !== 'APPROVER') {
         throw new AppError(403, 'FORBIDDEN', 'Only administrators and approvers can download the contract package');
       }
-      const { formId } = parse(formParams, req.params, 'Invalid contract form ID');
       await assertCanView(formId, user);
       const file = await generatePackage(formId, user);
       res
