@@ -6,15 +6,31 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: frontend-production
+  cancel-in-progress: false
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+
     defaults:
       run:
         working-directory: frontend
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Verify deployment target
+        env:
+          TARGET_APP: ${{ vars.AZURE_FRONTEND_APP_NAME }}
+        run: |
+          if [ "$TARGET_APP" != "contract-forms-frontend-261126" ]; then
+            echo "ERROR: Unexpected Azure frontend app: $TARGET_APP"
+            exit 1
+          fi
+          echo "Deployment target verified: $TARGET_APP"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -34,8 +50,32 @@ jobs:
           NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
         run: npm run build
 
-      - name: Create deployment package
-        run: zip -y -qr ../frontend-deploy.zip .next public package.json package-lock.json node_modules next.config.ts
+      - name: Prepare deployment package
+        env:
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          npm prune --omit=dev
+
+          rm -rf .next/cache .next/dev
+
+          BUILD_ID="$(cat .next/BUILD_ID)"
+
+          printf '{"commit":"%s","buildId":"%s"}\n' \
+            "$RELEASE_COMMIT" "$BUILD_ID" > public/deploy-info.json
+
+          echo "Release commit: $RELEASE_COMMIT"
+          echo "Next build ID: $BUILD_ID"
+
+          zip -y -qr ../frontend-deploy.zip \
+            .next public package.json package-lock.json node_modules next.config.ts
+
+      - name: Save deployment recovery artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-deployment-${{ github.sha }}
+          path: frontend-deploy.zip
+          retention-days: 3
+          if-no-files-found: error
 
       - name: Deploy to Azure App Service
         uses: azure/webapps-deploy@v3
