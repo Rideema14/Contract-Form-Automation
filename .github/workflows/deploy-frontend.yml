@@ -35,7 +35,7 @@ jobs:
         run: npm run build
 
       - name: Create deployment package
-        run: zip -qr ../frontend-deploy.zip .next public package.json package-lock.json node_modules next.config.ts
+        run: zip -y -qr ../frontend-deploy.zip .next public package.json package-lock.json node_modules next.config.ts
 
       - name: Deploy to Azure App Service
         uses: azure/webapps-deploy@v3
