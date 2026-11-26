@@ -1,45 +1,219 @@
 # 11. Azure Deployment
 
-> **Status:** Planned (Phase 2). **Nothing has been deployed. No Azure resources exist yet.** No prices, URLs or credentials are stated here; subscription details are pending (CL-17).
+## 1. Overview
 
-## Proposed Setup (to be validated against the company's subscription)
-| Component | Proposed Azure service |
+The Contract Forms Automation application uses Microsoft Azure for application hosting and database infrastructure.
+
+The deployment architecture separates the frontend, backend API, and PostgreSQL database. Application configuration and sensitive credentials are managed through environment-specific settings rather than committed to the source code.
+
+## 2. Azure Architecture
+
+| Component | Azure Service | Responsibility |
+|---|---|---|
+| Frontend | Azure App Service (Linux, Node.js) | Hosts the Next.js application and serves the user interface. |
+| Backend | Azure App Service (Linux, Node.js) | Hosts the Express REST API and handles business logic, authentication, authorization, and integrations. |
+| Database | Azure Database for PostgreSQL – Flexible Server | Stores users, contracts, approvals, attachments metadata, and audit records. |
+| Secrets | App Service Application Settings / Azure Key Vault | Stores sensitive configuration and credentials. |
+| Monitoring | App Service Logs / Azure Monitor | Supports application monitoring and troubleshooting. |
+
+The frontend communicates with the backend through the configured API base URL. The backend connects to PostgreSQL and integrates with Google Drive for private document storage.
+
+## 3. Environment Configuration
+
+Application configuration is maintained separately for the frontend and backend.
+
+### Backend Environment Variables
+
+The backend requires environment-specific configuration, including:
+
+- `NODE_ENV`
+- `PORT`
+- `CORS_ORIGIN`
+- `DATABASE_URL`
+- `JWT_SECRET`
+- Google Drive authentication and configuration variables
+- Notification-related variables, where configured
+
+### Frontend Environment Variables
+
+The frontend uses:
+
+- `NEXT_PUBLIC_API_BASE_URL`
+
+This variable identifies the backend API base URL used by the Next.js application.
+
+### Configuration Security
+
+- Production secrets are configured through the deployment environment.
+- Sensitive values must never be committed to GitHub.
+- Database credentials, JWT secrets, OAuth credentials, and refresh tokens must remain backend-only.
+- Public frontend environment variables must not contain private credentials.
+- Access to deployment settings should be restricted to authorized team members.
+
+## 4. Database Connection and Migrations
+
+The application uses Azure Database for PostgreSQL – Flexible Server.
+
+The backend connects to the configured PostgreSQL database through the `DATABASE_URL` environment variable.
+
+### Database Security
+
+- SSL must be enabled for the database connection.
+- Firewall and networking rules should restrict database access to the backend application and approved development environments.
+- Developer IP access should be limited to authorized users and removed when no longer required.
+- Database credentials must be stored securely.
+
+### Prisma Migrations
+
+Prisma is used to manage database schema changes.
+
+The production migration command is:
+
+```bash
+npx prisma migrate deploy
+```
+
+Production migration practices:
+
+1. Review migration files before deployment.
+2. Take a database backup before applying important schema changes.
+3. Apply committed migrations using `prisma migrate deploy`.
+4. Verify the database schema and application health after migration.
+
+`prisma migrate dev` is intended for development environments and must not be used against the shared production database.
+
+Database reset commands and unreviewed schema changes must not be run against production.
+
+### Initial Data and Admin Account
+
+Reference data and initial administrative access must be configured through the approved seed/setup process.
+
+The initial Admin password must be supplied securely outside the source code and changed according to the organization's security policy.
+
+## 5. Application Deployment
+
+The application deployment follows a separated frontend and backend architecture.
+
+### Frontend Deployment
+
+The Next.js frontend is hosted on Azure App Service.
+
+The deployment configuration includes:
+
+- Production build configuration
+- Required frontend environment variables
+- Backend API base URL
+- HTTPS access
+- Correct API communication settings
+
+### Backend Deployment
+
+The Express backend is hosted on Azure App Service.
+
+The backend deployment includes:
+
+- Node.js runtime configuration
+- Production environment settings
+- Database connection configuration
+- JWT authentication settings
+- Google Drive integration credentials
+- CORS configuration
+- Health-check endpoints
+
+The backend listens on the port supplied by the hosting environment, with the application's configured default used when appropriate.
+
+### CORS Configuration
+
+The backend CORS configuration must allow requests from the deployed frontend origin.
+
+Credentials must be enabled where required for the application's HttpOnly cookie-based authentication.
+
+Only trusted application origins should be allowed.
+
+## 6. Deployment Verification
+
+The following checks are used to verify application functionality after deployment.
+
+| Area | Verification |
 |---|---|
-| Frontend (Next.js) | Azure App Service (Linux, Node) or Static Web Apps with SSR support |
-| Backend (Express) | Azure App Service (Linux, Node) |
-| Database | Azure Database for PostgreSQL (Flexible Server) |
-| Secrets | App Service application settings (optionally Azure Key Vault) |
-| Logs | App Service logs / Azure Monitor |
-Final service choice is a decision for the team and company.
+| Frontend | Application loads successfully over HTTPS. |
+| Backend | API health endpoint responds successfully. |
+| Database | Database health endpoint confirms connectivity. |
+| Authentication | Users can log in and access their authorized dashboards. |
+| Contract Management | Users can create and save contract drafts. |
+| Approval Workflow | Submitted contracts follow the configured approval process. |
+| Role-Based Access | Users cannot access operations outside their permissions. |
+| PDF Generation | Contract PDFs can be generated through the backend. |
+| File Management | Authorized attachment operations work through the application. |
+| Dashboard | Contract counts and status information load correctly. |
 
-## Environment Variables
-All variables in `.env.example` are configured as App Service settings. Backend: `NODE_ENV`, `PORT`, `CORS_ORIGIN`, `DATABASE_URL`, `JWT_SECRET`, Drive and notification variables. Frontend: `NEXT_PUBLIC_API_BASE_URL`. Secrets are never committed.
+## 7. Cost Management and Azure Credits
 
-## Database Connection and Migrations
-- `DATABASE_URL` points to the Azure PostgreSQL server; SSL required.
-- Firewall/network rules allow only the backend App Service (and approved developer IPs temporarily).
-- Migrations run with `npx prisma migrate deploy` during deployment, never `migrate dev`, and only after taking a backup.
-- Seed (`seed.js`) runs once for reference data and the first Admin; the initial Admin password is supplied out-of-band.
+Azure resource usage should be monitored to keep the application within the available subscription credits and budget.
 
-## Deployment Steps (outline)
-1. Create resource group, PostgreSQL server/database, two App Services.
-2. Configure environment settings.
-3. Deploy backend; run `prisma migrate deploy`.
-4. Deploy frontend; set API URL; configure CORS.
-5. Smoke test: login, create draft, submit, approve.
-6. Record actual resource names and URLs in this document **after** they exist.
-Optional later: CI/CD via GitHub Actions.
+### Cost Management Practices
 
-## Budget Alerts and Credit Expiry
-- Create an Azure **budget** with alert thresholds on the resource group/subscription, notifying all three developers and the company contact.
-- Document: credit amount, **credit expiry date**, and what happens to the services at expiry (stop, delete, migrate). These values are to be filled in once known (CL-17).
-- Prefer the smallest suitable tiers; stop or deallocate unused resources.
+- Use the smallest suitable service tiers for the application's requirements.
+- Monitor resource usage through Azure Cost Management.
+- Configure budget alerts at the appropriate subscription or resource-group level.
+- Review database, application hosting, storage, and monitoring costs.
+- Stop or deallocate resources that are not required, where supported.
+- Review usage regularly to avoid unexpected consumption.
 
-## Checklist (to be completed in Phase 2)
-- [ ] Subscription access confirmed
-- [ ] Budget alert created
-- [ ] Credit expiry date recorded
-- [ ] Resources created and tagged
-- [ ] Migrations applied
-- [ ] Smoke test passed
-- [ ] Rollback/backup procedure documented
+### Credit Expiry
+
+Azure subscription credits may have an expiry date or usage restrictions depending on the subscription type.
+
+The team should track:
+
+- Available credit balance
+- Credit expiry date
+- Resource consumption
+- Subscription limitations
+- Required actions when credits expire
+
+If credits expire or become unavailable, the team must evaluate the available options, such as upgrading the subscription, transferring resources to an eligible subscription, or migrating the application infrastructure.
+
+The application should not be assumed to remain operational if its hosting or database resources are suspended due to expired credits.
+
+Exact credit amounts, expiry dates, and budget thresholds depend on the organization's Azure subscription.
+
+## 8. Backup and Recovery
+
+Database backups are important for protecting contract records, approval history, and application data.
+
+The deployment environment should use the backup and restore capabilities supported by Azure Database for PostgreSQL.
+
+The recovery process should include:
+
+1. Identify the required recovery point.
+2. Restore the database using the approved backup procedure.
+3. Verify the restored database and schema.
+4. Confirm backend connectivity.
+5. Test authentication and contract workflows.
+6. Verify that application data is accessible.
+
+Database backups and recovery procedures should follow the organization's retention and security requirements.
+
+## 9. Deployment and Operational Checklist
+
+| Item | Description |
+|---|---|
+| Frontend hosting | Next.js application hosted on Azure App Service. |
+| Backend hosting | Express API hosted on Azure App Service. |
+| Database | Azure Database for PostgreSQL – Flexible Server. |
+| Environment configuration | Application settings configured separately for frontend and backend. |
+| Database security | SSL and restricted network access. |
+| Migrations | Prisma production migrations. |
+| Authentication | Secure JWT and HttpOnly cookie configuration. |
+| CORS | Configured for the deployed frontend origin. |
+| Monitoring | Application logs and health checks. |
+| Cost management | Azure Cost Management and budget monitoring. |
+| Backup | Database backup and recovery procedure. |
+| File integration | Google Drive configuration and authorized backend access. |
+
+## 10. Deployment Access
+
+The application is accessible through its deployed frontend, which communicates with the backend API hosted on Azure.
+
+The deployed application address is provided separately.
