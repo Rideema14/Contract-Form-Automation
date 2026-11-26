@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getContractTokenCookie } from "@/lib/auth-bff";
 
-const PUBLIC_PATHS = new Set(["/login", "/register"]);
+const PUBLIC_PATHS = new Set(["/login", "/register", "/deploy-info.json"]);
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;

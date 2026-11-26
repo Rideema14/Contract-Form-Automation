@@ -8,6 +8,18 @@ afterEach(() => {
 });
 
 describe("page authentication proxy", () => {
+  it("allows the deploy info marker without authentication", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await proxy(
+      new NextRequest("https://app.example.test/deploy-info.json"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("uses the same-origin /api/auth/me route and forwards only contract_token", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
