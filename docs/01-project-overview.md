@@ -1,38 +1,66 @@
 # 01. Project Overview
 
-> **Status:** Setup and documentation stage. No application features are implemented yet.
+> **Status:** Application implemented and deployed. Core functionality, role-based access control, approval workflow, Google Drive integration, PDF generation, and technical documentation are in place.
 
 ## Purpose
-The **Contract Forms Automation** application replaces manual, document-based contract forms with a single web application. Staff create a contract form, route it through a sequential approval process, and receive a final PDF that follows the company's contract form format. Supporting documents and generated PDFs are stored in Google Drive.
 
-This is a company assessment deliverable built by three full-stack developers.
+The **Contract Forms Automation** application replaces manual, document-based contract forms with a centralized web application.
+
+Staff can create contract forms, save drafts, submit them through a sequential approval process, track their status, and access generated contract PDFs. Supporting documents and generated PDFs are stored securely in Google Drive, while contract records and workflow data are maintained in PostgreSQL.
+
+This application was developed as a company assessment deliverable by a team of three full-stack developers.
 
 ## Users
-| User type | Description |
+
+The application supports three roles:
+
+| User Type | Description |
 |---|---|
-| **User** | Creates and edits contract forms, saves drafts, submits forms, tracks status, and views documents they are authorized to see. |
-| **Admin** | Has User capabilities plus administrative management (users, roles, reference data) and wider visibility. Exact Admin powers over forms are listed in [02-requirements.md](02-requirements.md) as items to confirm. |
-| **Approver** | A participant in the approval chain. Whether this is a separate role or a User/Admin assigned to a step is **to be confirmed** by the company. |
+| **SUBMITTER** | Creates and edits their own contract forms, saves drafts, submits forms, tracks contract status, responds to returned forms, and accesses authorized documents. |
+| **ADMIN** | Manages users, roles, reference data, contract records, and administrative operations. Has wider access to application data and management features. |
+| **APPROVER** | Reviews contracts assigned to them, checks submitted information, adds review comments, and approves or returns contracts as part of the approval workflow. |
+
+Access to application features, contract records, and documents is controlled through backend role-based authorization.
 
 ## Scope
-In scope (see [02-requirements.md](02-requirements.md) for the full list):
-- Authentication and role-based access control
-- Contract form creation, editing and draft saving
-- Vendor, bidder, quotation, evaluation and cost estimate records
-- Sequential approval workflow with comments, history and audit trail
-- Notifications to the next approval participant
-- Document uploads, Google Drive storage and PDF generation
-- Dashboard and searchable contract register
-- Azure deployment and deployment documentation
 
-Out of scope: any feature not listed above. Do not add unrelated product features.
+The application covers the following functionality:
+
+- Authentication and role-based access control.
+- Contract form creation, editing, and draft saving.
+- Dynamic form configuration with version management.
+- Vendor, bidder, quotation, evaluation, and cost estimate records.
+- Sequential approval workflow with comments and approval history.
+- Contract status tracking and dashboard statistics.
+- Supporting document uploads and private Google Drive storage.
+- Final contract PDF generation and storage.
+- Authorized document viewing and downloading.
+- Searchable and filterable contract register.
+- Administrative user and reference data management.
+- Azure-based application and database infrastructure.
+- Technical documentation, setup instructions, and deployment configuration.
 
 ## Expected Outcome
-1. A working web application covering the full contract form lifecycle.
-2. A deployed Azure environment with deployment documentation.
-3. Google Drive storage for supporting documents and generated PDFs.
-4. A generated contract PDF following the company's sample form.
-5. Complete technical documentation so any developer can set up, run and extend the project.
+
+The project delivers:
+
+1. A working web application covering the contract form lifecycle, from creation and draft saving to submission, approval, and document retrieval.
+2. A deployed application environment using Azure services.
+3. Secure Google Drive storage for supporting documents and generated contract PDFs.
+4. Backend-generated contract PDFs containing contract information, bidder details, cost estimates, and approval history.
+5. PostgreSQL database persistence with Prisma ORM and version-controlled migrations.
+6. Role-based access control for submitters, approvers, and administrators.
+7. Technical documentation covering architecture, local setup, database schema, API contracts, Google Drive integration, PDF generation, deployment, and user workflows.
 
 ## Delivery Phases
-The company-defined phases are: (1) Main application and access control, (2) Azure deployment, (3) Google Drive storage integration, (4) Completed contract PDF generation. Details: [15-four-phase-implementation-plan.md](15-four-phase-implementation-plan.md).
+
+The project follows the four company-defined implementation phases:
+
+| Phase | Description | Delivered Functionality |
+|---|---|---|
+| **Phase 1** | Main Application and Access Control | Authentication, user roles, contract management, dashboard, and approval workflow. |
+| **Phase 2** | Azure Deployment | Azure application and PostgreSQL database infrastructure with deployment configuration. |
+| **Phase 3** | Google Drive Storage Integration | Private document storage, attachment management, and authorized file retrieval. |
+| **Phase 4** | Completed Contract PDF Generation | Contract PDF generation, storage, and authorized retrieval. |
+
+For the detailed implementation breakdown, refer to [15-four-phase-implementation-plan.md](15-four-phase-implementation-plan.md).

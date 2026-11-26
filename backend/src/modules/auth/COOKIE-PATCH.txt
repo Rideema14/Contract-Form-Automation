@@ -1,0 +1,29 @@
+Apply to backend/src/modules/auth/auth.controller.ts (authentication file: the team must approve this change).
+
+1) Replace the cookieOptions block (top of file) with:
+
+const SAME_SITE_VALUES = ['lax', 'strict', 'none'] as const;
+type SameSite = (typeof SAME_SITE_VALUES)[number];
+const requested = process.env.COOKIE_SAME_SITE as SameSite | undefined;
+// Default stays 'lax'. Use COOKIE_SAME_SITE=none ONLY when the frontend and API are on
+// different sites (e.g. two *.azurewebsites.net hosts); 'none' requires secure cookies.
+const sameSite: SameSite = requested && SAME_SITE_VALUES.includes(requested) ? requested : 'lax';
+const secure = process.env.NODE_ENV === 'production' || sameSite === 'none';
+
+const cookieOptions = {
+  httpOnly: true,
+  secure,
+  sameSite,
+  path: '/',
+  maxAge: 8 * 60 * 60 * 1000,
+};
+
+2) In logout(), change the clearCookie options to:
+
+  res.clearCookie(COOKIE_NAME, { httpOnly: true, secure, sameSite, path: '/' });
+
+3) In Azure App Settings (backend) add: COOKIE_SAME_SITE=none   (only if NOT using a shared custom domain)
+
+Preferred option: put frontend and API on one custom domain (app.example.com / api.example.com); then keep 'lax'
+and set no variable. With 'none', other sites can send the cookie on cross-site requests, so also keep the
+exact-origin CORS list and consider CSRF protection.

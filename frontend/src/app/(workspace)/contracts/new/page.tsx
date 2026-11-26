@@ -1,10 +1,27 @@
+"use client";
+
+import { Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import { LoaderCircle } from "lucide-react";
+import { ContractEditor } from "@/features/contracts/contract-editor";
+
+function NewContractForm() {
+  const searchParams = useSearchParams();
+  const lifecycleKey = searchParams.get("fresh") ?? "direct-new-contract";
+
+  return <ContractEditor key={lifecycleKey} />;
+}
+
 export default function NewContractPage() {
   return (
-    <main className="min-h-screen p-10">
-      <h1 className="text-2xl font-bold">New contract</h1>
-      <p className="mt-2 text-muted-foreground">
-        Planned page - not implemented yet.
-      </p>
-    </main>
+    <Suspense
+      fallback={
+        <main className="flex min-h-[50vh] items-center justify-center">
+          <LoaderCircle className="size-6 animate-spin text-muted-foreground" />
+        </main>
+      }
+    >
+      <NewContractForm />
+    </Suspense>
   );
 }

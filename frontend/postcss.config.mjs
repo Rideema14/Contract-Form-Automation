@@ -1,7 +1,7 @@
-// Tailwind CSS is wired through next.config.ts (turbopack CSS rule),
-// so no PostCSS plugins are required here.
 const config = {
-  plugins: {},
+  plugins: {
+    "@tailwindcss/postcss": {},
+  },
 };
 
 export default config;

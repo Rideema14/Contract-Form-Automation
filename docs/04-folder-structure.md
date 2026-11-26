@@ -1,68 +1,141 @@
 # 04. Folder Structure
 
+## Project Structure
+
+The project is organized into two main applications: `frontend` and `backend`, along with a documentation directory.
+
 ```text
-contract-automation/
-├── frontend/                Next.js application
-│   ├── public/              Static assets
+Contract-Form-Automation/
+│
+├── frontend/
+│   ├── public/                   Static assets
 │   └── src/
-│       ├── app/             App Router pages (one folder per route)
-│       │   ├── login/       Login page
-│       │   ├── dashboard/   Status totals and contract register
-│       │   ├── forms/       Create, view and edit contract forms
-│       │   ├── drafts/      User's saved drafts
-│       │   ├── approvals/   Approver inbox, decision screens, history
-│       │   ├── documents/   Document viewing and downloads
-│       │   └── admin/       User, role and reference data management
-│       ├── components/      Reusable React components
-│       │   ├── layout/      Navbar, sidebar, page shells
-│       │   ├── dashboard/   Status cards, register table, filters
-│       │   ├── forms/       Form sections, repeatable bidder rows, autocomplete
-│       │   ├── approvals/   Decision panel, history timeline
-│       │   ├── documents/   Upload widget, document list
-│       │   └── ui/          shadcn/ui primitives
-│       ├── services/        API client functions (one file per backend module)
-│       ├── hooks/           Custom React hooks
-│       ├── lib/             Utilities (API client, auth helpers, formatters)
-│       ├── schemas/         Zod schemas used with React Hook Form
-│       └── styles/          Global CSS and Tailwind layers
+│       ├── app/                  Next.js App Router pages and layouts
+│       ├── components/           Reusable React components
+│       ├── services/             Backend API communication
+│       ├── hooks/                Custom React hooks
+│       ├── lib/                  Shared frontend utilities
+│       ├── schemas/              Zod validation schemas
+│       └── styles/               Global styles and Tailwind CSS
+│
 ├── backend/
 │   ├── src/
-│   │   ├── config/          Env loading, Prisma client, Drive client, constants
-│   │   ├── middleware/      Auth, RBAC, ownership, validation, error handling, uploads
-│   │   ├── modules/         Feature modules (see below)
-│   │   ├── routes/          Central route registration (`/api/...`)
-│   │   ├── utils/           Shared helpers (errors, pagination, logger)
-│   │   ├── validators/      Shared Zod schemas used across modules
-│   │   └── app.js           Express app setup
-│   ├── prisma/              schema.prisma, migrations/, seed.js
-│   └── tests/               Backend tests
-├── docs/                    Project documentation and diagrams
-├── .env.example
-├── .gitignore
-└── README.md
+│   │   ├── config/               Environment and service configuration
+│   │   ├── middleware/           Authentication, authorization and validation
+│   │   ├── routes/               REST API route definitions
+│   │   ├── controllers/          Request and response handling
+│   │   ├── services/             Business logic and integrations
+│   │   ├── validators/           Request validation schemas
+│   │   ├── utils/                Shared backend utilities
+│   │   └── app.ts                Express application setup
+│   │
+│   ├── prisma/
+│   │   ├── schema.prisma         Database schema
+│   │   ├── migrations/           Version-controlled database migrations
+│   │   └── seed files            Initial and demonstration data
+│   │
+│   └── tests/                    Backend tests
+│
+├── docs/                         Technical documentation
+│
+├── .gitignore                    Git ignored files
+├── README.md                     Project overview and setup guide
+└── .env.example                  Environment variable reference
 ```
 
-## Backend Modules
-Each module is a folder that will contain `*.routes.js`, `*.controller.js`, `*.service.js`, and `*.validators.js`.
+*Note: This diagram represents the logical organization of the application. Refer to the actual repository for the exact filenames and nested folders.*
 
-| Module | Responsibility | Owner |
-|---|---|---|
-| `auth` | Login, token issue/verify, current user | Dev 1 |
-| `users` | User profile and management logic | Dev 1 |
-| `dashboard` | Status counts, register queries | Dev 1 |
-| `admin` | Admin-only management, reference data | Dev 1 |
-| `forms` | Contract form CRUD, drafts, submission | Dev 2 |
-| `vendors` | Vendor records, vendor type autocomplete | Dev 2 |
-| `bidders` | Bidders and quotation records | Dev 2 |
-| `evaluations` | Technical and commercial evaluations | Dev 2 |
-| `cost-estimates` | Cost breakdown lines, Excel estimate uploads | Dev 2 |
-| `approvals` | Sequential workflow, decisions, history | Dev 3 |
-| `audit` | Audit log writing and reading | Dev 3 |
-| `notifications` | Next-approver notifications | Dev 3 |
-| `documents` | Upload, metadata, authorized download | Dev 3 |
-| `pdf` | Puppeteer templates and PDF generation | Dev 3 |
+## Frontend Organization
 
-## Conventions
-- Files: `kebab-case.js`; React components: `PascalCase.jsx`.
-- No business logic in routes or components; put it in services.
-- Cross-module calls go through the other module's service, never its Prisma queries.
+The frontend uses Next.js App Router with React and TypeScript.
+
+| Directory | Responsibility |
+|---|---|
+| `app/` | Application pages, layouts, and routing. |
+| `components/` | Reusable UI components and feature-specific components. |
+| `services/` | API client functions for communicating with backend modules. |
+| `hooks/` | Reusable custom React hooks. |
+| `lib/` | Shared utilities, API helpers, authentication helpers, and formatters. |
+| `schemas/` | Zod schemas used for frontend form validation. |
+| `styles/` | Global CSS and Tailwind CSS styles. |
+| `public/` | Static images, icons, and other public assets. |
+
+### Main Application Areas
+
+The frontend provides interfaces for:
+
+- Login and authentication.
+- Dashboard and contract register.
+- Contract creation, viewing, and editing.
+- Draft management.
+- Approval inbox and decision screens.
+- Supporting documents and generated PDFs.
+- Administrative user and reference data management.
+
+## Backend Organization
+
+The backend uses Node.js, Express.js, and TypeScript.
+
+| Directory | Responsibility |
+|---|---|
+| `config/` | Environment configuration, Prisma client, Google Drive configuration, and application constants. |
+| `middleware/` | Authentication, RBAC, ownership checks, request validation, upload handling, and error handling. |
+| `routes/` | REST API endpoint definitions and route registration. |
+| `controllers/` | Handles incoming requests and prepares API responses. |
+| `services/` | Contains business logic, database operations, and external service integrations. |
+| `validators/` | Shared Zod validation schemas. |
+| `utils/` | Common helpers, logging, error handling, and reusable utilities. |
+| `prisma/` | Database schema, migrations, and seed scripts. |
+| `tests/` | Backend unit and integration tests. |
+
+## Main Backend Feature Areas
+
+The backend functionality is organized around the following feature areas:
+
+| Module | Responsibility |
+|---|---|
+| `auth` | Login, authentication, session handling, and current-user information. |
+| `users` | User profiles, account management, and role administration. |
+| `dashboard` | Contract statistics and register queries. |
+| `admin` | Administrative operations and reference data management. |
+| `forms` | Contract form creation, updates, drafts, and submission. |
+| `vendors` | Vendor records and vendor type management. |
+| `bidders` | Bidder details and quotation records. |
+| `evaluations` | Technical and commercial evaluation information. |
+| `cost-estimates` | Cost breakdowns and Excel estimate imports. |
+| `approvals` | Sequential approval workflow, decisions, and approval history. |
+| `audit` | Audit event recording and retrieval. |
+| `notifications` | Notifications associated with approval workflow actions. |
+| `documents` | Supporting document uploads, metadata, private Google Drive operations, and authorized downloads. |
+| `form-builder` | Dynamic form configuration, drafts, publishing, and schema versioning. |
+| `PDF generation` | Contract PDF rendering and final document generation. |
+
+These are logical feature areas. Their actual implementation may be distributed across route, controller, and service files rather than existing as separate folders for every module.
+
+## Database Organization
+
+Database-related files are maintained under `backend/prisma/`.
+
+| File / Directory | Responsibility |
+|---|---|
+| `schema.prisma` | Defines database models, fields, relationships, and constraints. |
+| `migrations/` | Stores version-controlled database schema changes. |
+| Seed scripts | Insert initial or demonstration records where required. |
+
+Prisma ORM is used for database access and migration management.
+
+## Development Conventions
+
+1. **Naming:** Use consistent naming conventions. TypeScript files generally use `.ts`, React components use `.tsx`, and React components use PascalCase names.
+
+2. **Separation of responsibilities:** Routes handle endpoint definitions, controllers handle HTTP requests and responses, and services contain business logic.
+
+3. **Reusable components:** Shared frontend UI elements and backend utilities should be reused instead of duplicated.
+
+4. **Validation:** Validate incoming data on the backend even when equivalent frontend validation exists.
+
+5. **Database access:** Database operations should be handled through Prisma and organized within the appropriate service layer.
+
+6. **Security:** Authentication, role permissions, ownership checks, and sensitive integrations must remain under backend control.
+
+7. **Environment configuration:** Credentials, database connection strings, and API secrets must be stored in environment variables and must never be committed to Git.

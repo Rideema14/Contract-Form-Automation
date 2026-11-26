@@ -29,10 +29,14 @@ Middleware verifies the requester is the form's creator, an assigned approver, o
 ## Protected Documents
 - Files are stored privately in Google Drive; no public links.
 - Downloads are streamed via the backend after a permission check.
+- The contract creator or Admin may upload while a form is `DRAFT` or `RETURNED`; the creator, an assigned approver, or Admin may list, view, or download its attachments.
+- Every attachment is checked against its form before access is granted. Drive file IDs remain private to the backend.
 - Upload validation: type allow-list, size limit, sanitized file names.
 
 ## Audit Logging
-Logged: login success/failure, form create/update/submit, status changes, approval actions, document upload/download, PDF generation, user/role changes. Each entry has actor, action, entity, timestamp. Logs are append-only and viewable by Admin.
+The audit history records contract creation and edits (including bidder, quotation, evaluation, and cost-line changes); submission, resubmission, deletion, approval, return, and rejection; user creation, updates, and role changes; reference-data creation, updates, and deletion; form-schema draft saves and publications; attachment uploads; and successfully generated final PDFs. Form-related events are linked to the contract record. Entries are append-only, include the actor, action, entity, timestamp, and relevant non-secret details, and are viewable by Admin.
+
+Login outcomes and attachment views/downloads are not currently recorded in the audit history.
 
 ## Other Controls
 - CORS restricted to the frontend origin.
