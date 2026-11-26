@@ -4,8 +4,7 @@ import type {
   ApiSuccessResponse,
 } from "@/types/api";
 
-export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000/api";
+export const API_BASE_URL = "/api";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -44,6 +43,16 @@ export function apiErrorMessage(error: unknown, fallback: string): string {
 type RequestOptions = Omit<RequestInit, "body"> & {
   body?: unknown;
 };
+
+function isFormDataBody(body: unknown): body is FormData {
+  return typeof FormData !== "undefined" && body instanceof FormData;
+}
+
+const AUTH_BFF_PATHS = new Set([
+  "/api/auth/login",
+  "/api/auth/me",
+  "/api/auth/logout",
+]);
 
 function isApiSuccessResponse(
   value: unknown,
@@ -96,19 +105,25 @@ async function requestPayload(
   options: RequestOptions,
 ): Promise<unknown> {
   const headers = new Headers(options.headers);
+  const isFormData = isFormDataBody(options.body);
+  const body =
+    options.body === undefined
+      ? undefined
+      : isFormDataBody(options.body)
+        ? options.body
+        : JSON.stringify(options.body);
 
-  if (options.body !== undefined && !headers.has("Content-Type")) {
+  if (options.body !== undefined && !isFormData && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
+  if (isFormData) headers.delete("Content-Type");
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const url = AUTH_BFF_PATHS.has(path) ? path : `${API_BASE_URL}${path}`;
+  const response = await fetch(url, {
     ...options,
     credentials: "include",
     headers,
-    body:
-      options.body === undefined
-        ? undefined
-        : JSON.stringify(options.body),
+    body,
     cache: "no-store",
   });
 

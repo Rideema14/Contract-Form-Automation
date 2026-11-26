@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { ApiError } from '@/lib/api-client';
+import { getCurrentUser } from '@/services/auth';
 
 export interface AuthUser {
   id: string;
@@ -9,7 +10,7 @@ export interface AuthUser {
   role: string;
 }
 
-/** Hook to fetch the currently authenticated user via backend endpoint */
+/** Hook to fetch the currently authenticated user via the same-origin auth route. */
 export function useAuth() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -18,43 +19,17 @@ export function useAuth() {
   useEffect(() => {
     (async () => {
       try {
-        const rawResponse = await fetch(
-          `${process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000/api'}/auth/me`,
-          {
-            method: 'GET',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-          }
-        );
-        if (rawResponse.ok) {
-          const body = (await rawResponse.json()) as { success: boolean; user: AuthUser };
-          setAuthUser(body.user);
-        } else if (rawResponse.status === 401) {
-          // Not authenticated – treat as no user.
-          setAuthUser(null);
-        } else {
-          const errBody = await rawResponse.json().catch(() => null);
-          const msg = errBody?.message || `Request failed with status ${rawResponse.status}`;
-          throw new ApiError(
-  {
-    success: false,
-    message: msg,
-    error: {
-      code: "REQUEST_FAILED",
-      details: [],
-    },
-  },
-  rawResponse.status,
-);
-        }
+        const response = await getCurrentUser();
+        setAuthUser({
+          ...response.user,
+          fullName: response.user.fullName ?? response.user.name,
+        });
       } catch (e) {
-        if (e instanceof ApiError) {
-          if (e.statusCode !== 401) {
-            setError(e.message);
-          }
-        } else {
-          setError(String(e));
+        if (e instanceof ApiError && e.statusCode === 401) {
+          setAuthUser(null);
+          return;
         }
+        setError(e instanceof Error ? e.message : String(e));
       } finally {
         setLoading(false);
       }
