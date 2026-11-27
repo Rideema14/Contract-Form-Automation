@@ -1,281 +1,45 @@
-# PDF Generation and Template Specification
+# PDF Generation
 
-## 1. Overview
+## Implementation
 
-The Contract Forms Automation application uses **PDFMake** to generate contract PDF documents within the Express backend.
+The backend uses PDFMake for PDF generation. PDF routes are mounted under `/api/forms/:formId`.
 
-Generated PDFs contain contract information, procurement details, vendor and bidder information, financial details, supporting document references, evaluation information, approval history, and audit-related records.
+Verified routes:
 
-The generated PDF is stored in the contract's private Google Drive folder, while its metadata is maintained in PostgreSQL.
+- `GET /api/forms/:formId/pdf` - generate/download a current contract snapshot
+- `POST /api/forms/:formId/final-pdf/generate` - generate or retrieve the approved final PDF attachment
+- `POST /api/forms/:formId/final-pdf` - download a package of PDF/package files for ADMIN or APPROVER
 
-PDF generation and private Drive storage are integrated into the application's contract approval workflow.
+The attachment router does not expose Google Drive IDs in public PDF metadata.
 
-## 2. PDF Generation Flow
+## Current PDF
 
-The official final PDF is generated after the final approval transaction is successfully committed.
+The current PDF is generated from live contract data and may be downloaded while the contract is accessible to the authenticated user.
 
-```text
-FINAL APPROVAL
-      |
-      v
-APPROVAL TRANSACTION COMMITTED
-      |
-      v
-BACKEND LOADS CONTRACT DATA
-      |
-      |---- Contract Details
-      |---- Bidder / Quotation Data
-      |---- Cost Information
-      |---- Supporting Documents
-      |---- Evaluation Records
-      |---- Approval History
-      |---- Audit Records
-      |
-      v
-PDFMAKE GENERATES PDF
-      |
-      v
-PRIVATE GOOGLE DRIVE STORAGE
-      |
-      v
-POSTGRESQL METADATA SAVED
-(GENERATED_PDF)
-      |
-      v
-AUTHORIZED DOCUMENT ACCESS
-```
+## Final PDF
 
-### Generation Steps
+Final PDF generation is available only after the caller passes form view authorization and the role is one of ADMIN, APPROVER, or SUBMITTER. The implementation can store the final PDF as a `GENERATED_PDF` attachment when document storage is configured.
 
-1. The final approval transaction is committed successfully.
-2. The backend loads the saved contract form and its associated information.
-3. PDFMake renders the required 14 sections inside the Express backend.
-4. The generated PDF is stored in the contract's private Google Drive folder.
-5. The backend saves the document metadata in PostgreSQL with the category `GENERATED_PDF`.
-6. Authorized users can retrieve the generated PDF through the application's attachment routes.
+## Download security
 
-## 3. Required PDF Sections
+PDF responses use:
 
-The generated contract PDF contains the following 14 sections:
+- `Content-Type: application/pdf`
+- authenticated attachment disposition
+- `X-Content-Type-Options: nosniff`
+- `Cache-Control: private, no-store`
 
-| # | Section | Data Source |
-|---|---|---|
-| 1 | Contract/Project Identification | `ContractForm`, `User` |
-| 2 | Sponsor Department | `Department` |
-| 3 | Contract Category and Scope | `ContractCategory`, `ContractForm.scope` |
-| 4 | Procurement/Sourcing Rationale | `ContractForm.procurementRationale` |
-| 5 | Vendor/Contractor Details | `Vendor`, `VendorType`, `Bidder` |
-| 6 | Contract Amount and Currency | `ContractForm`, `Currency` |
-| 7 | Budget and Cost Estimate | `ContractForm.budgetProvision`, `CostLine`, `ContractForm.taxAmount` |
-| 8 | Bidders and Quotations | `Bidder`, `Quotation` |
-| 9 | Technical Evaluation | `Evaluation` (`TECHNICAL`) |
-| 10 | Commercial Evaluation | `Evaluation` (`COMMERCIAL`) |
-| 11 | Recommended Vendor and Selection Rationale | `ContractForm`, `Vendor`, `Bidder` |
-| 12 | Supporting Documents | `Attachment` metadata |
-| 13 | Approval History | `ApprovalStep`, `ApprovalDecision` |
-| 14 | Audit/Record Information | `AuditLog`, timestamps, record IDs |
+## Package behavior
 
-### Section Details
+The contract-package endpoint is restricted to ADMIN and APPROVER roles. Live package contents and filename conventions are implemented in the document/final-PDF services; they should be verified through an approved disposable contract.
 
-**1. Contract/Project Identification**
+## Google Drive dependency
 
-Contains the contract reference number, project information, identification details, and relevant creator information.
+Final PDF storage and attachment retrieval require Google Drive configuration and a successful provider upload. Current snapshots can be generated without persistent storage, subject to the implementation's data access checks.
 
-**2. Sponsor Department**
+## Verification status
 
-Displays the department responsible for sponsoring the contract.
-
-**3. Contract Category and Scope**
-
-Includes the selected contract category and description of the contract scope.
-
-**4. Procurement/Sourcing Rationale**
-
-Explains the procurement approach and the rationale behind the sourcing decision.
-
-**5. Vendor/Contractor Details**
-
-Displays vendor and contractor information, including relevant vendor classification and bidder details.
-
-**6. Contract Amount and Currency**
-
-Displays the contract amount and its associated currency.
-
-**7. Budget and Cost Estimate**
-
-Includes the planned budget, cost breakdown, and applicable tax amount.
-
-**8. Bidders and Quotations**
-
-Displays bidder information and associated quotation details.
-
-**9. Technical Evaluation**
-
-Contains technical evaluation information for the participating bidders.
-
-**10. Commercial Evaluation**
-
-Contains commercial evaluation information and related assessment details.
-
-**11. Recommended Vendor and Selection Rationale**
-
-Displays the recommended vendor and the documented reason for selection.
-
-**12. Supporting Documents**
-
-Lists supporting document information associated with the contract.
-
-**13. Approval History**
-
-Displays the approval workflow, approver information, decisions, comments, and relevant timestamps.
-
-**14. Audit/Record Information**
-
-Contains relevant record identifiers, timestamps, and audit information associated with the contract.
-
-## 4. PDF Download and Generation APIs
-
-The application supports different PDF operations depending on the user's requirements and contract status.
-
-### A. Current Contract PDF Snapshot
-
-| Property | Details |
-|---|---|
-| Method | GET |
-| Endpoint | `/api/forms/:formId/pdf` |
-| Access | Contract creator |
-| Purpose | Generates a PDF snapshot of the current saved contract form. |
-
-This endpoint allows the contract creator to download a snapshot of the current saved form at any contract status.
-
-The snapshot is generated on demand and is not stored as an official final PDF attachment.
-
-### B. Generate or Retrieve Official Final PDF
-
-| Property | Details |
-|---|---|
-| Method | POST |
-| Endpoint | `/api/forms/:formId/final-pdf/generate` |
-| Access | Contract creator, assigned Approver, or Admin for approved forms |
-| Purpose | Creates or retrieves the official final PDF. |
-
-For approved contracts, this endpoint generates the official stored final PDF or retrieves the existing one.
-
-The generated PDF is stored as a `GENERATED_PDF` attachment.
-
-The client then downloads the PDF through the normal authorized attachment route.
-
-This operation does not repeat the approval workflow.
-
-### C. Download Final PDF Package
-
-| Property | Details |
-|---|---|
-| Method | POST |
-| Endpoint | `/api/forms/:formId/final-pdf` |
-| Access | Authorized Admin or assigned Approver |
-| Purpose | Downloads a ZIP package containing the final PDF and supporting files. |
-
-The ZIP package contains:
-
-- `Contract_Form.pdf`
-- The contract's associated supporting files.
-
-The endpoint reuses the stored final PDF when available. Otherwise, it invokes the existing approved-only PDF service and stores one `GENERATED_PDF` attachment before creating the package.
-
-The official final PDF also remains available separately in the contract's attachment list.
-
-## 5. PDF Storage and Metadata
-
-Generated PDFs are stored in the corresponding private Google Drive contract folder.
-
-The backend maintains the associated metadata in PostgreSQL.
-
-| Property | Description |
-|---|---|
-| Document Category | `GENERATED_PDF` |
-| Storage | Private Google Drive |
-| Metadata Storage | PostgreSQL |
-| Association | Related contract record |
-| Access | Authorized backend attachment routes |
-
-The Google Drive File ID is never exposed directly to the frontend.
-
-## 6. Approval and PDF Consistency
-
-The official final PDF is generated using saved contract information after the final approval transaction has committed.
-
-The backend loads the relevant contract information, including:
-
-- Contract details.
-- Vendor and bidder information.
-- Quotation details.
-- Cost estimates.
-- Supporting document metadata.
-- Technical and commercial evaluations.
-- Approval history.
-- Audit information.
-
-PDF generation and Drive storage are separate operations from the approval transaction.
-
-A PDF or Google Drive failure does not roll back an already committed approval.
-
-In such cases:
-
-- The approval remains committed.
-- The approval response reports the PDF or storage failure.
-- An authorized administrator can retry through the final PDF package endpoint.
-
-This keeps approval processing independent from document storage availability.
-
-## 7. Versioned Form Schema Support
-
-Each contract retains its original `FormSchemaVersion`.
-
-The PDF generation service uses the contract's pinned form schema version rather than the latest published configuration.
-
-This ensures that:
-
-- Previously created contracts retain their original form structure.
-- New form publications do not change existing contract definitions.
-- Saved `dynamicValues` are rendered using the applicable version.
-- Additional configured sections and fields are included according to the contract's associated schema version.
-
-## 8. PDF Security
-
-The PDF generation and retrieval process follows the application's security model.
-
-- PDF generation runs inside the Express backend.
-- Google Drive files remain private.
-- Document access requires authentication and authorization.
-- Only authorized users can retrieve contract PDFs.
-- Drive File IDs are not exposed to the frontend.
-- The final PDF is stored as a document attachment.
-- Approval and PDF generation operations follow their respective permission rules.
-
-## 9. Implementation References
-
-The PDF generation and storage implementation is maintained in the following backend files:
-
-| File | Responsibility |
-|---|---|
-| `backend/src/modules/documents/pdf.service.ts` | Builds and renders contract PDFs using PDFMake. |
-| `backend/src/modules/documents/final-pdf.service.ts` | Handles approved-only final PDF generation and idempotent storage. |
-| `backend/src/modules/documents/drive.service.ts` | Handles Google Drive file operations. |
-| `backend/src/modules/documents/attachments.router.ts` | Handles authorized attachment access and document operations. |
-
-## 10. Visual Template and Formatting
-
-The generated PDF follows the contract form structure and includes the required sections and associated contract information.
-
-The company's sample contract form (CL-01) serves as the visual reference for reviewing presentation details such as:
-
-- Page size and orientation.
-- Company branding and logo.
-- Section headings and labels.
-- Tables and column layouts.
-- Spacing and typography.
-- Headers and footers.
-- Page numbering and document formatting.
-
-The generated document maintains the required contract information, bidder and cost tables, supporting document references, approval history, and audit information.
+- PDFMake implementation: verified
+- Route names: verified
+- Live PDF layout and visual quality: **Needs verification**
+- Live Google Drive attachment persistence: **Needs verification**

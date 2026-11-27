@@ -1,273 +1,159 @@
-# 17. Setup Guide (Windows-Friendly)
+# Local Development Setup
 
-## 1. Overview
+## Prerequisites
 
-The Contract Forms Automation application supports local development on Windows.
+- Node.js 24 (the repository `/.nvmrc`)
+- npm
+- Git
+- PostgreSQL
+- Optional Google OAuth credentials or service account
 
-The frontend and backend can run locally while connecting to the configured PostgreSQL database hosted on Azure.
+Windows PowerShell commands are provided below.
 
-Google Drive integration is implemented at the backend level. However, actual file uploads require valid Google Drive credentials and an approved private folder configuration.
+## 1. Clone
 
-## 2. Prerequisites
+```powershell
+git clone https://github.com/Rideema14/Contract-Form-Automation.git
+Set-Location Contract-Form-Automation
+```
 
-Install the following tools:
+## 2. Backend
 
-| Tool | Requirement |
+```powershell
+Set-Location backend
+Copy-Item .env.example .env
+npm ci
+npm run db:generate
+npm run dev
+```
+
+Required backend variables:
+
+| Variable | Required | Purpose |
+|---|---:|---|
+| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `JWT_SECRET` | Yes | JWT signing secret, minimum 32 characters |
+| `NODE_ENV` | No | defaults to `development` |
+| `PORT` | No | defaults to `4000` |
+| `FRONTEND_ORIGIN` | No | exact comma-separated CORS origins |
+| `JWT_EXPIRES_IN` | No | backend login token lifetime |
+| `DOCUMENT_ALLOWED_EXTENSIONS` | For uploads | comma-separated file extensions |
+| `DOCUMENT_MAX_FILE_SIZE_BYTES` | For uploads | maximum bytes per file |
+| `DOCUMENT_MAX_FILE_COUNT` | For uploads | maximum files per request |
+| `GOOGLE_DRIVE_AUTH_MODE` | For Drive | `oauth` or `service-account` |
+| `GOOGLE_OAUTH_CLIENT_ID` | OAuth only | OAuth client ID |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | OAuth only | OAuth client secret |
+| `GOOGLE_OAUTH_REFRESH_TOKEN` | OAuth only | approved refresh token |
+| `GOOGLE_DRIVE_FOLDER_ID` | OAuth/folder or service account | optional OAuth app folder; service-account folder required |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Service account only | path to the JSON key file |
+
+Backend scripts:
+
+```powershell
+npm run dev
+npm run build
+npm start
+npm run typecheck
+npm test
+npm run db:generate
+npm run db:migrate
+npm run db:deploy
+npm run db:seed
+npm run db:studio
+```
+
+The backend listens on `http://localhost:4000` by default.
+
+Health endpoints:
+
+- `GET http://localhost:4000/api/health`
+- `GET http://localhost:4000/api/health/db`
+
+## 3. Frontend
+
+Open a second terminal:
+
+```powershell
+Set-Location frontend
+Copy-Item .env.example .env.local
+npm ci
+npm run dev
+```
+
+Frontend variables:
+
+| Variable | Purpose |
 |---|---|
-| Node.js | Version specified by the project, or compatible Node.js LTS |
-| npm | Installed with Node.js |
-| Git | Required for cloning and managing the repository |
-| VS Code | Recommended code editor |
-| PostgreSQL | Not required locally when using the configured shared Azure database |
+| `API_BASE_URL` | server-only backend URL ending in `/api`; preferred |
+| `NEXT_PUBLIC_API_BASE_URL` | public/build-time fallback backend URL |
+| `APP_ORIGIN` | public origin for custom production domains |
+| `NEXT_PUBLIC_DEMO_*` | optional public demo login values; never production secrets |
 
-Verify Node.js and npm:
-
-```powershell
-node -v
-npm -v
-```
-
-Verify Git:
-
-```powershell
-git --version
-```
-
-## 3. Clone and Open the Repository
-
-Clone the project repository using its Git URL:
-
-```powershell
-git clone <REPOSITORY_URL>
-cd Contract-Form-Automation
-```
-
-The `develop` branch contains the current development source.
-
-If necessary, switch to it:
-
-```powershell
-git checkout develop
-git pull origin develop
-```
-
-Open the project in VS Code:
-
-```powershell
-code .
-```
-
-## 4. Configure Environment Variables
-
-Create the local environment files from the provided examples:
-
-```powershell
-Copy-Item backend\.env.example backend\.env
-Copy-Item frontend\.env.example frontend\.env.local
-```
-
-Update the environment files with the required configuration.
-
-### Backend Configuration
-
-The backend environment file is:
-
-`backend/.env`
-
-Configure the required values, including:
-
-- `NODE_ENV`
-- `PORT`
-- `DATABASE_URL`
-- `JWT_SECRET`
-- `CORS_ORIGIN` or the frontend origin variable used by the project
-- Google Drive configuration variables, when enabled
-
-The database connection must point to the authorized PostgreSQL database.
-
-Use the connection settings supplied by the project administrator. Never commit database credentials or other secrets.
-
-### Frontend Configuration
-
-The frontend environment file is:
-
-`frontend/.env.local`
-
-Configure:
-
-```env
-NEXT_PUBLIC_API_BASE_URL=http://localhost:4000/api
-```
-
-This allows the locally running frontend to communicate with the backend API.
-
-### Environment Security
-
-- Never commit `.env` or `.env.local` files.
-- Never share database passwords, JWT secrets, OAuth refresh tokens, or service-account keys.
-- Do not expose private credentials through `NEXT_PUBLIC_` variables.
-- Keep Google Drive credentials in backend-only environment settings.
-
-## 5. Backend Setup
-
-Open a PowerShell terminal in the project root.
-
-Navigate to the backend:
-
-```powershell
-cd backend
-```
-
-Install dependencies:
-
-```powershell
-npm install
-```
-
-Generate the Prisma Client:
-
-```powershell
-npx prisma generate
-```
-
-Start the backend development server:
+Frontend scripts:
 
 ```powershell
 npm run dev
+npm run build
+npm start
+npm run lint
+npm test
 ```
 
-The backend is expected to run at:
+The frontend default URL is `http://localhost:3000`.
 
-`http://localhost:4000`
+## 4. Database
 
-**Important database safety note:**
+Use a dedicated local or disposable PostgreSQL database.
 
-The current development configuration uses the shared Azure PostgreSQL database. Do not run the following commands against that shared database:
-
-- `npx prisma migrate dev`
-- `npx prisma migrate reset`
-- `npx prisma db push`
-- `npx prisma db seed`
-
-These commands can modify or overwrite shared database data.
-
-Database schema changes must follow the team's approved migration process.
-
-## 6. Frontend Setup
-
-Open a second PowerShell terminal.
-
-Navigate to the frontend:
+Development migration workflow:
 
 ```powershell
-cd frontend
+Set-Location backend
+npm run db:generate
+npm run db:migrate
 ```
 
-Install dependencies:
+Production migration workflow:
 
 ```powershell
-npm install
+npm run db:deploy
 ```
 
-Start the Next.js development server:
+Do not run `npx prisma migrate reset`, `npx prisma db push`, or seed scripts against shared or production databases.
+
+## 5. Seeds
+
+Reference seed:
 
 ```powershell
-npm run dev
+$env:NODE_ENV="development"
+npm run db:seed
 ```
 
-The frontend is expected to run at:
+The normal seed refuses non-localhost database hosts.
 
-`http://localhost:3000`
-
-## 7. Verify the Application
-
-Open the frontend in your browser:
-
-`http://localhost:3000`
-
-Verify the backend health endpoint:
-
-`http://localhost:4000/api/health`
-
-Verify the database connection:
-
-`http://localhost:4000/api/health/db`
-
-Check that:
-
-1. The frontend loads successfully.
-2. The backend responds to health checks.
-3. The backend can connect to PostgreSQL.
-4. Authentication works with authorized test credentials.
-5. Users can access their permitted dashboards.
-6. Contract forms and their saved data load correctly.
-
-## 8. Google Drive Configuration
-
-Google Drive credentials must be configured privately before real file operations can be verified.
-
-The backend requires the appropriate authentication configuration, such as:
-
-- OAuth client ID
-- OAuth client secret
-- OAuth refresh token
-- Approved Drive folder configuration, where applicable
-
-Keep these values in backend environment variables or the deployment secret store.
-
-Until a real Google Drive account and folder are configured and verified, do not assume that uploads, downloads, or generated PDF storage in Drive have been successfully tested.
-
-Refer to `google-drive-setup.md` for detailed configuration instructions.
-
-## 9. Troubleshooting
-
-### Port Already in Use
-
-If port `3000` or `4000` is already occupied:
-
-- Stop the process using that port, or
-- Configure another available port and update the relevant environment settings.
-
-### Database Connection Error
-
-Check:
-
-- The `DATABASE_URL` value.
-- Database username and password.
-- PostgreSQL server availability.
-- SSL configuration.
-- Azure database firewall and network access rules.
-
-### Frontend Cannot Reach Backend
-
-Check:
-
-- The backend server is running.
-- `NEXT_PUBLIC_API_BASE_URL` points to the correct backend address.
-- The backend CORS configuration allows the frontend origin.
-- Cookie and credential settings are configured correctly.
-
-### Prisma Client Error
-
-Regenerate the Prisma Client:
+Demo users:
 
 ```powershell
-npx prisma generate
+npm run seed:demo
 ```
 
-### PowerShell Script Policy Error
+This upserts the demo users and prints demo passwords. It is not safe for production.
 
-If PowerShell blocks a required script, review the execution policy for your environment. If appropriate, use:
+Showcase seed:
 
 ```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+$env:ALLOW_SHOWCASE_SEED="true"
+npm run seed:showcase
 ```
 
-## 10. Development Notes
+The showcase seed requires demo users and a published form schema. Set `SHOWCASE_SEED_UPLOAD_PDF=false` to skip optional PDF/Drive upload.
 
-- Run the frontend and backend in separate terminals.
-- Use the `develop` branch as the current development source.
-- Keep environment files and credentials private.
-- Do not execute destructive database commands against the shared Azure database.
-- Use the team's approved process for database migrations and seed updates.
-- Test Google Drive operations only after the required credentials and private folder configuration are available.
+## 6. Troubleshooting
+
+- **Database connection failure:** verify `DATABASE_URL`, PostgreSQL availability, firewall/network access, and TLS.
+- **401 or expired session:** ensure `JWT_SECRET` is consistent and `contract_token` is accepted by browser/CORS configuration.
+- **CORS failure:** set `FRONTEND_ORIGIN` to the exact frontend scheme and host.
+- **Frontend cannot reach backend:** verify `API_BASE_URL` is HTTPS in production and ends in `/api`.
+- **Prisma client failure:** run `npm run db:generate`.
+- **Upload unavailable:** verify all three `DOCUMENT_*` variables and Google Drive credentials.

@@ -1,125 +1,148 @@
-# 06. API Documentation
+# API Documentation
 
-> **All endpoints are PROPOSED and NOT IMPLEMENTED.** Base path: `/api`. JSON in/out. All routes except login require authentication. Access column: **U** = authenticated user (owner checks apply), **A** = Admin, **AP** = assigned approver.
+## Base URLs
 
-## Auth
-| Method | Endpoint | Description | Access |
-|---|---|---|---|
-| POST | `/auth/login` | Log in, receive token | Public |
-| POST | `/auth/logout` | End session | U |
-| GET | `/auth/me` | Current user and role | U |
+- Local backend: `http://localhost:4000/api`
+- Frontend same-origin proxy: `http://localhost:3000/api`
+- Azure backend: `https://contract-forms-backend-261126.azurewebsites.net/api`
+- Azure frontend: `https://contract-forms-frontend-261126.azurewebsites.net`
 
-## Users (Admin)
-| Method | Endpoint | Description | Access |
-|---|---|---|---|
-| GET | `/users` | List users | A |
-| POST | `/users` | Create user | A |
-| PATCH | `/users/:id` | Update user/role/active state | A |
-| GET | `/users/approvers` | List active approver accounts | U |
+Both Azure health endpoints were verified live with HTTP 200 on 2026-11-27:
 
-## Forms
-| Method | Endpoint | Description | Access |
-|---|---|---|---|
-| GET | `/forms` | Contract register: search, filter, paginate | U (own) / A (all) |
-| POST | `/forms` | Create form (draft) | U |
-| GET | `/forms/:id` | Form detail | U owner / AP / A |
-| PATCH | `/forms/:id` | Update draft or returned form | U owner / A |
-| POST | `/forms/:id/save-draft` | Save with relaxed validation | U owner / A |
-| DELETE | `/forms/:id` | Delete a draft form | U owner / A |
-| POST | `/forms/:id/submit` | Full validation, start approval | U owner |
-| GET | `/forms/drafts` | Current user's drafts | U |
+- `GET https://contract-forms-backend-261126.azurewebsites.net/api/health`
+- `GET https://contract-forms-backend-261126.azurewebsites.net/api/health/db`
 
-## Vendors
-| Method | Endpoint | Description | Access |
-|---|---|---|---|
-| GET | `/vendors` | List/search vendors | U |
-| POST | `/vendors` | Create vendor | U |
-| GET | `/vendors/types?q=` | Vendor type autocomplete | U |
+## Authentication
 
-## Bidders and Quotations
-| Method | Endpoint | Description | Access |
-|---|---|---|---|
-| GET | `/forms/:id/bidders` | List bidders | U owner / AP / A |
-| POST | `/forms/:id/bidders` | Add bidder | U owner / A |
-| PATCH | `/forms/:id/bidders/:bidderId` | Update bidder | U owner / A |
-| DELETE | `/forms/:id/bidders/:bidderId` | Remove bidder | U owner / A |
-| POST | `/bidders/:bidderId/quotations` | Add quotation | U owner / A |
-| PATCH | `/quotations/:id` | Update quotation | U owner / A |
+Login creates an HTTP-only cookie named `contract_token`. The backend expects this cookie rather than a bearer Authorization header.
 
-## Evaluations
-| Method | Endpoint | Description | Access |
-|---|---|---|---|
-| GET | `/forms/:id/evaluations` | List evaluations | U owner / AP / A |
-| PUT | `/forms/:id/evaluations` | Save technical/commercial evaluations | U owner / A |
+Use `POST /api/auth/login` with:
 
-## Cost Estimates
-| Method | Endpoint | Description | Access |
-|---|---|---|---|
-| GET | `/forms/:id/cost-estimate` | Get breakdown | U owner / AP / A |
-| PUT | `/forms/:id/cost-estimate` | Save breakdown lines | U owner / A |
-| POST | `/forms/:id/cost-estimate/excel` | Upload Excel estimate | U owner / A |
-| GET | `/forms/cost-estimate/template` | Download the standard `.xlsx` cost template | U |
-| POST | `/forms/:formId/cost-lines/import` | Validate and append cost rows from the standard template | U owner / A |
+```json
+{
+  "email": "authorized-user@example.test",
+  "password": "replace-with-authorized-password"
+}
+```
 
-The import template requires `Description`, `Quantity` and `Unit Cost` columns. Amounts are
-calculated by the server; imported rows append to existing rows. Imports accept `.xlsx` files up
-to 5 MiB and 500 non-empty rows. Invalid files are rejected without creating any rows.
+Logout: `POST /api/auth/logout`
+
+Current user: `GET /api/auth/me`
+
+Protected responses use an envelope similar to:
+
+```json
+{
+  "success": false,
+  "message": "Authentication required",
+  "error": { "code": "AUTHENTICATION_REQUIRED", "details": [] },
+  "meta": { "requestId": "uuid" }
+}
+```
+
+## Health
+
+| Method | Path | Access |
+|---|---|---|
+| GET | `/api/health` | Public |
+| GET | `/api/health/db` | Public |
+
+## Contracts and form data
+
+All contract routes require authentication.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/forms` | Create contract |
+| GET | `/api/forms` | List visible contracts |
+| GET | `/api/forms/drafts` | List visible drafts |
+| GET | `/api/forms/:id` | Get contract |
+| PATCH | `/api/forms/:id` | Update contract |
+| POST | `/api/forms/:id/save-draft` | Save draft |
+| DELETE | `/api/forms/:id` | Delete draft/eligible contract |
+| POST | `/api/forms/:id/submit` | Submit or resubmit |
+
+Bidder routes:
+
+- `GET/POST /api/forms/:formId/bidders`
+- `PATCH/DELETE /api/forms/:formId/bidders/:bidderId`
+- `GET/POST /api/forms/:formId/bidders/:bidderId/quotations`
+- `PATCH/DELETE /api/forms/:formId/bidders/:bidderId/quotations/:quotationId`
+
+Cost and evaluation routes:
+
+- `GET/POST/PATCH/DELETE /api/forms/:formId/cost-lines`
+- `POST /api/forms/:formId/cost-lines/import`
+- `GET /api/forms/cost-estimate/template`
+- `GET /api/forms/:formId/cost-estimate`
+- `GET /api/forms/:formId/evaluations`
+- `PUT /api/forms/:formId/evaluations`
 
 ## Approvals
-| Method | Endpoint | Description | Access |
-|---|---|---|---|
-| GET | `/approvals/pending` | Forms awaiting my decision | AP |
-| POST | `/approvals/:formId/approve` | Approve (comment) | AP |
-| POST | `/approvals/:formId/return` | Return (comment required) | AP |
-| POST | `/approvals/:formId/reject` | Reject (comment required) | AP |
-| GET | `/forms/:id/approval-history` | Full history | U owner / AP / A |
 
-## Documents
-| Method | Endpoint | Description | Access |
-|---|---|---|---|
-| POST | `/forms/:id/documents` | Upload supporting document | U owner / A |
-| GET | `/forms/:id/documents` | List documents (metadata) | Authorized |
-| GET | `/documents/:id/download` | Stream file via backend | Authorized |
-| DELETE | `/forms/:formId/attachments/:attachmentId` | Remove an attachment; deletion is audited | U owner (draft/returned) / A |
+| Method | Path | Role/access |
+|---|---|---|
+| POST | `/api/approvals/workflow` | Initialize workflow |
+| GET | `/api/approvals/pending` | APPROVER or ADMIN |
+| GET | `/api/approvals/history/:id` | Authorized contract participant |
+| GET | `/api/approvals/forms/:id/history` | Authorized contract participant |
+| GET | `/api/approvals/:id` | Authorized participant |
+| POST | `/api/approvals/:id/approve` | Assigned approver or admin |
+| POST | `/api/approvals/:id/return` | Assigned approver or admin |
+| POST | `/api/approvals/:id/reject` | Assigned approver or admin |
 
-## PDF
-| Method | Endpoint | Description | Access |
-|---|---|---|---|
-| GET | `/forms/:formId/pdf` | Download a PDF snapshot of the current saved contract; not stored | Contract creator, assigned approver, or Admin |
-| POST | `/forms/:formId/final-pdf/generate` | Generate or retrieve the approved final PDF and return attachment metadata | Contract creator, assigned approver, or Admin |
-| POST | `/forms/:formId/final-pdf` | Download a ZIP containing the final PDF and supporting files | Assigned approver or Admin |
+## Dashboard, notifications, and admin
 
-The final-PDF generation endpoint is available only for approved contracts. The
-returned attachment can be downloaded through the authorized attachment download
-endpoint.
+- `GET /api/dashboard`
+- `GET/PATCH /api/notifications`
+- `PATCH /api/notifications/mark-all-read`
+- `PATCH /api/notifications/:id/read`
+- `GET /api/admin/audit` - ADMIN
+- `GET/POST /api/users` - ADMIN for mutations
+- `PATCH /api/users/:id` - ADMIN
+- `GET /api/users/approvers`
 
-## Dashboard
-| Method | Endpoint | Description | Access |
-|---|---|---|---|
-| GET | `/dashboard/summary` | Counts: total, draft, pending, approved, rejected/returned | U (own) / A (all) |
+## Reference data and form builder
 
-## Notifications
-| Method | Endpoint | Description | Access |
-|---|---|---|---|
-| GET | `/notifications` | My notifications | U |
-| PATCH | `/notifications/:id/read` | Mark read | U |
+Reference data:
 
-## Audit (Admin)
-| Method | Endpoint | Description | Access |
-|---|---|---|---|
-| GET | `/admin/audit?page=&pageSize=&q=` | Search and paginate recorded audit history | A |
+- `GET /api/reference-data`
+- `POST/PATCH/DELETE /api/reference-data/:category...` - ADMIN mutations
 
-## Admin / Reference Data
-| Method | Endpoint | Description | Access |
-|---|---|---|---|
-| GET | `/reference-data` | List reference values | U |
-| POST | `/reference-data/:category` | Create departments, categories, vendors, vendor types, and currencies | A |
-| PATCH/DELETE | `/reference-data/:category/:id` | Update or remove reference values | A |
-| GET | `/form-builder/draft` | Get draft form schema | A |
-| PUT | `/form-builder/draft` | Save draft form schema | A |
-| POST | `/form-builder/publish` | Publish form schema | A |
+Form builder:
 
-## Conventions (proposed)
-- Errors: `{ "error": { "code": "...", "message": "...", "details": [] } }`
-- Status codes: 400 validation, 401 unauthenticated, 403 forbidden, 404 not found, 409 invalid state transition.
-- Pagination: `?page=1&pageSize=20`; register filters: `status`, `department`, `category`, `vendor`, `q`, `from`, `to`.
+- `GET /api/form-builder/published`
+- `GET /api/form-builder/draft` - ADMIN
+- `PUT /api/form-builder/draft` - ADMIN
+- `POST /api/form-builder/publish` - ADMIN
+
+## Attachments and PDFs
+
+All routes require authentication:
+
+- `GET /api/forms/:formId/attachments/config`
+- `POST /api/forms/:formId/attachments/validate`
+- `GET /api/forms/:formId/attachments`
+- `POST /api/forms/:formId/attachments`
+- `DELETE /api/forms/:formId/attachments/:attachmentId`
+- `GET /api/forms/:formId/attachments/:attachmentId/download`
+- `GET /api/forms/:formId/attachments/:attachmentId/view`
+- `GET /api/forms/:formId/pdf`
+- `POST /api/forms/:formId/final-pdf/generate`
+- `POST /api/forms/:formId/final-pdf` - ADMIN or APPROVER
+
+Upload uses `multipart/form-data` with field name `files`, category body field, and matching display names.
+
+## HTTP validation and status codes
+
+Common codes:
+
+- `400` validation or malformed JSON
+- `401` missing/invalid authentication
+- `403` role, ownership, or cross-origin rejection
+- `404` missing resource
+- `409` invalid state or conflict
+- `500` internal server error
+- `503` unavailable document policy/integration
+
+The repository frontend rejects cross-origin mutating API requests and only forwards `contract_token`, range, ETag, download, and no-store headers needed by the proxy.

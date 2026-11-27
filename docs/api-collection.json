@@ -1,0 +1,91 @@
+{
+  "info": {
+    "name": "Contract Forms Automation API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:4000/api" },
+    { "key": "azureBaseUrl", "value": "https://contract-forms-backend-261126.azurewebsites.net/api" },
+    { "key": "formId", "value": "00000000-0000-4000-8000-000000000000" },
+    { "key": "attachmentId", "value": "00000000-0000-4000-8000-000000000001" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        { "name": "Liveness", "request": { "method": "GET", "url": "{{baseUrl}}/health" } },
+        { "name": "Database health", "request": { "method": "GET", "url": "{{baseUrl}}/health/db" } }
+      ]
+    },
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"authorized-user@example.test\",\n  \"password\": \"replace-with-authorized-password\"\n}" },
+            "url": "{{baseUrl}}/auth/login"
+          }
+        },
+        { "name": "Current user", "request": { "method": "GET", "url": "{{baseUrl}}/auth/me" } },
+        { "name": "Logout", "request": { "method": "POST", "url": "{{baseUrl}}/auth/logout" } }
+      ]
+    },
+    {
+      "name": "Contracts",
+      "item": [
+        { "name": "List contracts", "request": { "method": "GET", "url": "{{baseUrl}}/forms" } },
+        { "name": "List drafts", "request": { "method": "GET", "url": "{{baseUrl}}/forms/drafts" } },
+        { "name": "Get contract", "request": { "method": "GET", "url": "{{baseUrl}}/forms/{{formId}}" } },
+        {
+          "name": "Create contract",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Disposable assessment contract\"\n}" },
+            "url": "{{baseUrl}}/forms"
+          }
+        },
+        { "name": "Submit contract", "request": { "method": "POST", "url": "{{baseUrl}}/forms/{{formId}}/submit" } }
+      ]
+    },
+    {
+      "name": "Approvals",
+      "item": [
+        { "name": "Pending approvals", "request": { "method": "GET", "url": "{{baseUrl}}/approvals/pending" } },
+        { "name": "Approval detail", "request": { "method": "GET", "url": "{{baseUrl}}/approvals/{{formId}}" } },
+        { "name": "Approval history", "request": { "method": "GET", "url": "{{baseUrl}}/approvals/history/{{formId}}" } },
+        {
+          "name": "Approve",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"comment\": \"Approved for assessment\"\n}" },
+            "url": "{{baseUrl}}/approvals/{{formId}}/approve"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Attachments and PDFs",
+      "item": [
+        { "name": "Upload config", "request": { "method": "GET", "url": "{{baseUrl}}/forms/{{formId}}/attachments/config" } },
+        { "name": "List attachments", "request": { "method": "GET", "url": "{{baseUrl}}/forms/{{formId}}/attachments" } },
+        { "name": "Download attachment", "request": { "method": "GET", "url": "{{baseUrl}}/forms/{{formId}}/attachments/{{attachmentId}}/download" } },
+        { "name": "View attachment", "request": { "method": "GET", "url": "{{baseUrl}}/forms/{{formId}}/attachments/{{attachmentId}}/view" } },
+        { "name": "Current PDF", "request": { "method": "GET", "url": "{{baseUrl}}/forms/{{formId}}/pdf" } },
+        { "name": "Generate final PDF", "request": { "method": "POST", "url": "{{baseUrl}}/forms/{{formId}}/final-pdf/generate" } }
+      ]
+    },
+    {
+      "name": "Dashboard and notifications",
+      "item": [
+        { "name": "Dashboard", "request": { "method": "GET", "url": "{{baseUrl}}/dashboard" } },
+        { "name": "Notifications", "request": { "method": "GET", "url": "{{baseUrl}}/notifications" } },
+        { "name": "Mark all read", "request": { "method": "PATCH", "url": "{{baseUrl}}/notifications/mark-all-read" } }
+      ]
+    }
+  ]
+}
