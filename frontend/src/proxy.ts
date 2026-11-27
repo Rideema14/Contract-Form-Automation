@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getContractTokenCookie } from "@/lib/auth-bff";
+import { backendApiBaseUrl, getContractTokenCookie } from "@/lib/auth-bff";
 
 const PUBLIC_PATHS = new Set(["/login", "/register", "/deploy-info.json"]);
 
@@ -14,19 +14,23 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  let shouldClearCookie = false;
-  try {
-    const cookie = getContractTokenCookie(request.headers.get("cookie"));
-    const authUrl = new URL("/api/auth/me", request.url);
-    const response = await fetch(authUrl, {
-      headers: cookie ? { Cookie: cookie } : undefined,
-      cache: "no-store",
-      redirect: "manual",
-    });
-    if (response.ok) return NextResponse.next();
-    shouldClearCookie = response.status === 401;
-  } catch {
-    // The login page will show the backend connection state.
+  const cookie = getContractTokenCookie(request.headers.get("cookie"));
+  let shouldClearCookie = !cookie;
+  if (cookie) {
+    try {
+      // Ask the backend directly. Calling this app's own /api/auth/me through
+      // request.url fails behind Azure, where that URL is https://localhost:<port>.
+      const response = await fetch(`${backendApiBaseUrl()}/auth/me`, {
+        headers: { Accept: "application/json", Cookie: cookie },
+        cache: "no-store",
+        redirect: "manual",
+      });
+      if (response.ok) return NextResponse.next();
+      shouldClearCookie = response.status === 401;
+    } catch (error) {
+      // The login page will show the backend connection state.
+      console.error("Session check failed", error);
+    }
   }
 
   const loginUrl = request.nextUrl.clone();

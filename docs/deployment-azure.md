@@ -127,7 +127,9 @@ The backend requires configuration for:
 
 The frontend requires:
 
+- `API_BASE_URL` – Deployed backend API base URL, read by the server at runtime.
 - `NEXT_PUBLIC_API_BASE_URL` – Deployed backend API base URL.
+- `APP_ORIGIN` – Public frontend origin used to verify login and other write requests. Not needed on the default App Service hostname (`WEBSITE_HOSTNAME` is used); set it for a custom domain.
 - Other frontend configuration values required by the application.
 
 Sensitive values are configured through Azure App Service Application Settings or the approved deployment secret store.

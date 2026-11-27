@@ -38,48 +38,54 @@ export function backendApiBaseUrl(): string {
   return `${baseUrl.origin}/api`;
 }
 
+function parseAppOrigin(value: string): URL | null {
+  // Only a bare origin is accepted: no credentials, path, query or fragment.
+  if (!/^https?:\/\/[^/\\?#@\s]+\/?$/i.test(value)) return null;
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The public origin that browsers use to reach this app.
+ *
+ * Behind a reverse proxy such as Azure App Service, Next.js builds `request.url`
+ * from its internal listener (for example https://localhost:8080), so production
+ * relies on server configuration instead of anything sent with the request:
+ *   1. APP_ORIGIN, if set (required for a custom domain).
+ *   2. WEBSITE_HOSTNAME, which Azure App Service sets automatically.
+ * Outside production, with neither set, the Host header is used.
+ * Returns null when no trustworthy origin can be determined.
+ */
+export function publicAppOrigin(request: Request): string | null {
+  const isProduction = process.env.NODE_ENV === "production";
+  const azureHostname = process.env.WEBSITE_HOSTNAME;
+  const configured =
+    process.env.APP_ORIGIN ||
+    (azureHostname ? `https://${azureHostname}` : undefined);
+
+  if (configured) {
+    const url = parseAppOrigin(configured);
+    if (!url || (isProduction && url.protocol !== "https:")) return null;
+    return url.origin;
+  }
+
+  if (isProduction) return null;
+
+  const requestUrl = new URL(request.url);
+  const host = request.headers.get("host") ?? requestUrl.host;
+  return parseAppOrigin(`${requestUrl.protocol}//${host}`)?.origin ?? null;
+}
 
 export function isSameOriginRequest(request: Request): boolean {
-  const configuredOrigin = process.env.FRONTEND_PUBLIC_ORIGIN;
-
-  let expectedOrigin: string;
-
-  if (configuredOrigin) {
-    // Reject whitespace or malformed configuration.
-    if (configuredOrigin.trim() !== configuredOrigin) {
-      return false;
-    }
-
-    try {
-      const parsedConfiguredOrigin = new URL(configuredOrigin);
-
-      if (
-        parsedConfiguredOrigin.protocol !== "https:" ||
-        parsedConfiguredOrigin.username ||
-        parsedConfiguredOrigin.password ||
-        parsedConfiguredOrigin.pathname !== "/" ||
-        parsedConfiguredOrigin.search ||
-        parsedConfiguredOrigin.hash
-      ) {
-        return false;
-      }
-
-      expectedOrigin = parsedConfiguredOrigin.origin;
-    } catch {
-      return false;
-    }
-  } else {
-    // Production must always have an explicitly configured public origin.
-    if (process.env.NODE_ENV === "production") {
-      return false;
-    }
-
-    // Preserve local development and test behavior.
-    try {
-      expectedOrigin = new URL(request.url).origin;
-    } catch {
-      return false;
-    }
+  const expectedOrigin = publicAppOrigin(request);
+  if (!expectedOrigin) {
+    console.error(
+      "Rejected request: set APP_ORIGIN to the public HTTPS origin of this app, for example https://app.example.com",
+    );
+    return false;
   }
 
   const origin = request.headers.get("origin");
@@ -87,7 +93,6 @@ export function isSameOriginRequest(request: Request): boolean {
   if (origin !== null) {
     try {
       const parsedOrigin = new URL(origin);
-
       return (
         parsedOrigin.origin === expectedOrigin &&
         !parsedOrigin.username &&
@@ -102,11 +107,9 @@ export function isSameOriginRequest(request: Request): boolean {
   }
 
   const referer = request.headers.get("referer");
-
   if (referer !== null) {
     try {
       const parsedReferer = new URL(referer);
-
       return (
         parsedReferer.origin === expectedOrigin &&
         !parsedReferer.username &&
