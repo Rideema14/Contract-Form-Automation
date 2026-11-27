@@ -564,7 +564,7 @@ The deployment process includes:
 - Deployment verification.
 - Budget monitoring and cost alerts.
 
-**Deployment status:** Application hosting deployment and production URL will be documented after deployment is completed.
+**Deployment status:** Azure database and application deployment have been completed successfully. The deployed application uses the Azure-hosted PostgreSQL database as its shared database environment.
 
 For deployment instructions and configuration, refer to:
 
