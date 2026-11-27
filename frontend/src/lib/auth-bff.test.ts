@@ -1,3 +1,4 @@
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   backendApiBaseUrl,
@@ -7,12 +8,20 @@ import {
 
 const originalApiUrl = process.env.API_BASE_URL;
 const originalPublicApiUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+const originalFrontendOrigin = process.env.FRONTEND_PUBLIC_ORIGIN;
 
 afterEach(() => {
   if (originalApiUrl === undefined) delete process.env.API_BASE_URL;
   else process.env.API_BASE_URL = originalApiUrl;
-  if (originalPublicApiUrl === undefined) delete process.env.NEXT_PUBLIC_API_BASE_URL;
+
+  if (originalPublicApiUrl === undefined)
+    delete process.env.NEXT_PUBLIC_API_BASE_URL;
   else process.env.NEXT_PUBLIC_API_BASE_URL = originalPublicApiUrl;
+
+  if (originalFrontendOrigin === undefined)
+    delete process.env.FRONTEND_PUBLIC_ORIGIN;
+  else process.env.FRONTEND_PUBLIC_ORIGIN = originalFrontendOrigin;
+
   vi.unstubAllEnvs();
 });
 
@@ -39,101 +48,135 @@ describe("backendApiBaseUrl", () => {
   ])("rejects unsafe backend URL %s", (url) => {
     vi.stubEnv("NODE_ENV", "production");
     process.env.API_BASE_URL = url;
-    expect(() => backendApiBaseUrl()).toThrow("configured backend API URL is invalid");
+    expect(() => backendApiBaseUrl()).toThrow(
+      "configured backend API URL is invalid",
+    );
   });
 });
 
 describe("same-origin and cookie helpers", () => {
-  it("accepts exact Origin or Referer and ignores forwarded host headers", () => {
-    expect(
-      isSameOriginRequest(
-        new Request("https://app.example.test/api/action", {
-          headers: { Origin: "https://app.example.test" },
-        }),
-      ),
-    ).toBe(true);
+  const publicOrigin =
+    "https://contract-forms-frontend-261126.azurewebsites.net";
 
-    expect(
-      isSameOriginRequest(
-        new Request("https://app.example.test:443/api/action", {
-          headers: {
-            Host: "app.example.test:443",
-            Origin: "https://app.example.test",
-          },
-        }),
-      ),
-    ).toBe(true);
-
-    expect(
-      isSameOriginRequest(
-        new Request("https://app.example.test/api/action", {
-          headers: {
-            Origin: "https://attacker.example",
-            "X-Forwarded-Host": "attacker.example",
-            "X-Forwarded-Proto": "https",
-          },
-        }),
-      ),
-    ).toBe(false);
-
+  it("accepts the configured public origin even when the Next.js URL is internal", () => {
     vi.stubEnv("NODE_ENV", "production");
-    expect(
-      isSameOriginRequest(
-        new Request("http://app.example.test/api/action", {
-          headers: {
-            Origin: "https://app.example.test",
-            Host: "app.example.test",
-            "X-Forwarded-Proto": "https",
-          },
-        }),
-      ),
-    ).toBe(true);
-
-    expect(
-      isSameOriginRequest(
-        new Request("http://app.example.test/api/action", {
-          headers: {
-            Origin: "https://attacker.example",
-            Host: "app.example.test",
-            "X-Forwarded-Proto": "https, http",
-          },
-        }),
-      ),
-    ).toBe(false);
-
-    expect(
-      isSameOriginRequest(
-        new Request("https://app.example.test/api/action", {
-          headers: { Referer: "https://app.example.test/page" },
-        }),
-      ),
-    ).toBe(true);
-  });
-
-  it("accepts Azure App Service requests with an internal Next.js URL and public origin", () => {
-    vi.stubEnv("NODE_ENV", "production");
-    const publicHost = "contract-forms-frontend-261126.azurewebsites.net";
+    vi.stubEnv("FRONTEND_PUBLIC_ORIGIN", publicOrigin);
 
     expect(
       isSameOriginRequest(
         new Request("http://n/api/auth/login", {
           headers: {
-            Host: publicHost,
-            Origin: `https://${publicHost}`,
-            Referer: `https://${publicHost}/login`,
-            "X-Forwarded-Proto": "https",
+            Host: "internal-container:3000",
+            Origin: publicOrigin,
+            Referer: `${publicOrigin}/login`,
             "Sec-Fetch-Site": "same-origin",
           },
         }),
       ),
     ).toBe(true);
+  });
+
+  it("accepts the configured public origin when forwarded protocol is missing", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("FRONTEND_PUBLIC_ORIGIN", publicOrigin);
 
     expect(
       isSameOriginRequest(
-        new Request("http://n/api/auth/login", {
+        new Request("http://internal-container:3000/api/auth/login", {
           headers: {
-            Host: publicHost,
+            Origin: publicOrigin,
+            Host: "internal-container:3000",
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a different or malformed Origin", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("FRONTEND_PUBLIC_ORIGIN", publicOrigin);
+
+    expect(
+      isSameOriginRequest(
+        new Request("http://internal-container:3000/api/auth/login", {
+          headers: { Origin: "https://attacker.example" },
+        }),
+      ),
+    ).toBe(false);
+
+    expect(
+      isSameOriginRequest(
+        new Request("http://internal-container:3000/api/auth/login", {
+          headers: { Origin: "not-a-valid-origin" },
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects missing or invalid production configuration", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    delete process.env.FRONTEND_PUBLIC_ORIGIN;
+
+    expect(
+      isSameOriginRequest(
+        new Request("http://internal-container:3000/api/auth/login", {
+          headers: { Origin: publicOrigin },
+        }),
+      ),
+    ).toBe(false);
+
+    vi.stubEnv("FRONTEND_PUBLIC_ORIGIN", "http://app.example.test");
+
+    expect(
+      isSameOriginRequest(
+        new Request("http://internal-container:3000/api/auth/login", {
+          headers: { Origin: "http://app.example.test" },
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("accepts the configured public Referer when Origin is absent", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("FRONTEND_PUBLIC_ORIGIN", publicOrigin);
+
+    expect(
+      isSameOriginRequest(
+        new Request("http://internal-container:3000/api/auth/login", {
+          headers: {
+            Referer: `${publicOrigin}/login`,
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a different Referer when Origin is absent", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("FRONTEND_PUBLIC_ORIGIN", publicOrigin);
+
+    expect(
+      isSameOriginRequest(
+        new Request("http://internal-container:3000/api/auth/login", {
+          headers: {
+            Referer: "https://attacker.example/login",
+          },
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects a cross-origin request even if forwarded headers claim the public host", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("FRONTEND_PUBLIC_ORIGIN", publicOrigin);
+
+    expect(
+      isSameOriginRequest(
+        new Request("http://internal-container:3000/api/auth/login", {
+          headers: {
             Origin: "https://attacker.example",
+            "X-Forwarded-Host":
+              "contract-forms-frontend-261126.azurewebsites.net",
             "X-Forwarded-Proto": "https",
           },
         }),
@@ -143,9 +186,13 @@ describe("same-origin and cookie helpers", () => {
 
   it("forwards only one well-formed contract token cookie", () => {
     expect(
-      getContractTokenCookie("theme=dark; contract_token=token.value; session=other"),
+      getContractTokenCookie(
+        "theme=dark; contract_token=token.value; session=other",
+      ),
     ).toBe("contract_token=token.value");
+
     expect(getContractTokenCookie("contract_token=; other=value")).toBeNull();
+
     expect(
       getContractTokenCookie("contract_token=first; contract_token=second"),
     ).toBeNull();

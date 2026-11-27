@@ -1,3 +1,4 @@
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { POST as login } from "@/app/api/auth/login/route";
@@ -9,6 +10,7 @@ import {
 } from "@/app/api/[...path]/route";
 
 const originalApiUrl = process.env.API_BASE_URL;
+const originalFrontendOrigin = process.env.FRONTEND_PUBLIC_ORIGIN;
 
 function request(
   path: string,
@@ -30,6 +32,11 @@ function routeContext(path: string[]) {
 afterEach(() => {
   if (originalApiUrl === undefined) delete process.env.API_BASE_URL;
   else process.env.API_BASE_URL = originalApiUrl;
+
+  if (originalFrontendOrigin === undefined)
+    delete process.env.FRONTEND_PUBLIC_ORIGIN;
+  else process.env.FRONTEND_PUBLIC_ORIGIN = originalFrontendOrigin;
+
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -76,6 +83,7 @@ describe("dedicated authentication routes", () => {
 
   it("forwards Azure-proxied login requests despite Next.js using an internal URL", async () => {
     process.env.API_BASE_URL = "https://api.example.test/api";
+
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ success: true, user: { id: "u1" } }), {
         status: 200,
@@ -85,17 +93,19 @@ describe("dedicated authentication routes", () => {
         },
       }),
     );
+
     vi.stubGlobal("fetch", fetchMock);
+
     const publicHost = "contract-forms-frontend-261126.azurewebsites.net";
+    process.env.FRONTEND_PUBLIC_ORIGIN = `https://${publicHost}`;
 
     const response = await login(
       new NextRequest("http://n/api/auth/login", {
         method: "POST",
         headers: {
-          Host: publicHost,
+          Host: "internal-container:3000",
           Origin: `https://${publicHost}`,
           Referer: `https://${publicHost}/login`,
-          "X-Forwarded-Proto": "https",
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ email: "user@example.test", password: "pass" }),

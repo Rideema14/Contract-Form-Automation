@@ -38,44 +38,48 @@ export function backendApiBaseUrl(): string {
   return `${baseUrl.origin}/api`;
 }
 
+
 export function isSameOriginRequest(request: Request): boolean {
-  const requestUrl = new URL(request.url);
-  const host = request.headers.get("host");
-  let requestHost = requestUrl.host;
-  if (host !== null) {
-    if (!host.trim()) return false;
+  const configuredOrigin = process.env.FRONTEND_PUBLIC_ORIGIN;
+
+  let expectedOrigin: string;
+
+  if (configuredOrigin) {
+    // Reject whitespace or malformed configuration.
+    if (configuredOrigin.trim() !== configuredOrigin) {
+      return false;
+    }
+
     try {
-      const parsedHost = new URL(`${requestUrl.protocol}//${host}`);
+      const parsedConfiguredOrigin = new URL(configuredOrigin);
+
       if (
-        parsedHost.username ||
-        parsedHost.password ||
-        parsedHost.pathname !== "/" ||
-        parsedHost.search ||
-        parsedHost.hash
+        parsedConfiguredOrigin.protocol !== "https:" ||
+        parsedConfiguredOrigin.username ||
+        parsedConfiguredOrigin.password ||
+        parsedConfiguredOrigin.pathname !== "/" ||
+        parsedConfiguredOrigin.search ||
+        parsedConfiguredOrigin.hash
       ) {
         return false;
       }
-      requestHost = parsedHost.host;
+
+      expectedOrigin = parsedConfiguredOrigin.origin;
     } catch {
       return false;
     }
-  }
-
-  const forwardedProtocol = request.headers.get("x-forwarded-proto");
-  let expectedOrigin = requestUrl.origin;
-  if (forwardedProtocol !== null) {
-    const protocol = forwardedProtocol.trim().toLowerCase();
-    if (
-      !/^(https?)$/.test(protocol) ||
-      (requestUrl.protocol === "https:" && protocol !== "https:") ||
-      (requestUrl.protocol === "http:" &&
-        protocol === "https:" &&
-        process.env.NODE_ENV !== "production")
-    ) {
+  } else {
+    // Production must always have an explicitly configured public origin.
+    if (process.env.NODE_ENV === "production") {
       return false;
     }
 
-    expectedOrigin = new URL(`${protocol}://${requestHost}`).origin;
+    // Preserve local development and test behavior.
+    try {
+      expectedOrigin = new URL(request.url).origin;
+    } catch {
+      return false;
+    }
   }
 
   const origin = request.headers.get("origin");
@@ -83,6 +87,7 @@ export function isSameOriginRequest(request: Request): boolean {
   if (origin !== null) {
     try {
       const parsedOrigin = new URL(origin);
+
       return (
         parsedOrigin.origin === expectedOrigin &&
         !parsedOrigin.username &&
@@ -97,9 +102,11 @@ export function isSameOriginRequest(request: Request): boolean {
   }
 
   const referer = request.headers.get("referer");
+
   if (referer !== null) {
     try {
       const parsedReferer = new URL(referer);
+
       return (
         parsedReferer.origin === expectedOrigin &&
         !parsedReferer.username &&
