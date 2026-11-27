@@ -118,6 +118,7 @@ The backend validates access to protected resources to prevent unauthorized acce
 | Authentication | JWT, password hashing |
 | Testing | Vitest, Supertest |
 | Version Control | Git, GitHub |
+| Deployment | Azure |
 
 ---
 
@@ -651,7 +652,7 @@ The core application implementation, database integration, and functional develo
 | Dashboard and contract register | Implemented |
 | Automated testing | Implemented |
 | Technical documentation | Finalization |
-| Azure application deployment | Pending |
+| Azure application deployment | Implemented |
 
 ---
 
