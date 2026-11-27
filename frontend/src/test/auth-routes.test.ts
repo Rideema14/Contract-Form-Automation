@@ -74,6 +74,41 @@ describe("dedicated authentication routes", () => {
     expect(new Headers(fetchMock.mock.calls[0][1].headers).has("cookie")).toBe(false);
   });
 
+  it("forwards Azure-proxied login requests despite Next.js using an internal URL", async () => {
+    process.env.API_BASE_URL = "https://api.example.test/api";
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true, user: { id: "u1" } }), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "Set-Cookie": "contract_token=jwt.value; Path=/; HttpOnly; SameSite=Lax",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const publicHost = "contract-forms-frontend-261126.azurewebsites.net";
+
+    const response = await login(
+      new NextRequest("http://n/api/auth/login", {
+        method: "POST",
+        headers: {
+          Host: publicHost,
+          Origin: `https://${publicHost}`,
+          Referer: `https://${publicHost}/login`,
+          "X-Forwarded-Proto": "https",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email: "user@example.test", password: "pass" }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/auth/login",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("checks /me with only contract_token and clears invalid sessions", async () => {
     process.env.API_BASE_URL = "https://api.example.test/api";
     const fetchMock = vi.fn().mockResolvedValue(

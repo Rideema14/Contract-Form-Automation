@@ -110,6 +110,37 @@ describe("same-origin and cookie helpers", () => {
     ).toBe(true);
   });
 
+  it("accepts Azure App Service requests with an internal Next.js URL and public origin", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const publicHost = "contract-forms-frontend-261126.azurewebsites.net";
+
+    expect(
+      isSameOriginRequest(
+        new Request("http://n/api/auth/login", {
+          headers: {
+            Host: publicHost,
+            Origin: `https://${publicHost}`,
+            Referer: `https://${publicHost}/login`,
+            "X-Forwarded-Proto": "https",
+            "Sec-Fetch-Site": "same-origin",
+          },
+        }),
+      ),
+    ).toBe(true);
+
+    expect(
+      isSameOriginRequest(
+        new Request("http://n/api/auth/login", {
+          headers: {
+            Host: publicHost,
+            Origin: "https://attacker.example",
+            "X-Forwarded-Proto": "https",
+          },
+        }),
+      ),
+    ).toBe(false);
+  });
+
   it("forwards only one well-formed contract token cookie", () => {
     expect(
       getContractTokenCookie("theme=dark; contract_token=token.value; session=other"),

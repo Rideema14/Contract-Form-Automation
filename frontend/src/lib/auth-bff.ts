@@ -41,12 +41,12 @@ export function backendApiBaseUrl(): string {
 export function isSameOriginRequest(request: Request): boolean {
   const requestUrl = new URL(request.url);
   const host = request.headers.get("host");
+  let requestHost = requestUrl.host;
   if (host !== null) {
     if (!host.trim()) return false;
     try {
       const parsedHost = new URL(`${requestUrl.protocol}//${host}`);
       if (
-        parsedHost.host.toLowerCase() !== requestUrl.host.toLowerCase() ||
         parsedHost.username ||
         parsedHost.password ||
         parsedHost.pathname !== "/" ||
@@ -55,6 +55,7 @@ export function isSameOriginRequest(request: Request): boolean {
       ) {
         return false;
       }
+      requestHost = parsedHost.host;
     } catch {
       return false;
     }
@@ -74,7 +75,7 @@ export function isSameOriginRequest(request: Request): boolean {
       return false;
     }
 
-    expectedOrigin = `${protocol}://${requestUrl.host}`;
+    expectedOrigin = new URL(`${protocol}://${requestHost}`).origin;
   }
 
   const origin = request.headers.get("origin");
