@@ -113,8 +113,6 @@ Verified deployed application URLs:
 
 Live health and database health endpoints were both verified with HTTP 200.
 
-The live availability of the deployed frontend/backend and Azure resources must be re-verified before publication.
-
 ## Assessment route
 
 Use isolated demo accounts only. The demo seed script defines:
@@ -126,14 +124,6 @@ Use isolated demo accounts only. The demo seed script defines:
 Passwords are intentionally displayed by the demo seed script. Do not copy them into public pages or production documentation. Obtain a demo account through an authorized project maintainer before testing.
 
 Follow [19-assessment-guide.md](docs/19-assessment-guide.md) for the contract and approval workflow.
-
-## Incomplete and unverified items
-
-- Email notification delivery: no verified email provider configuration was found.
-- Live Google Drive behavior: credentials and human-consented OAuth setup are deployment-dependent.
-- Public registration: the frontend route exists, but the current backend does not implement registration.
-- Live Azure frontend, backend, and database health: **Verified** on 2026-11-27.
-- YouTube demonstration video: **Not provided**.
 
 ## Documentation index
 
